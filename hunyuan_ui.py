@@ -552,6 +552,201 @@ def get_batch_gallery():
     return [str(img) for img in images[:48]]
 
 
+# ============================================================================
+# BATCH CONFIG SAVE/LOAD
+# ============================================================================
+
+BATCH_CONFIGS_DIR = OUTPUT_DIR / "batch_configs"
+BATCH_CONFIGS_DIR.mkdir(exist_ok=True)
+
+
+def save_batch_config(
+    batch_name: str,
+    themes_text: str,
+    variations_per_theme: int,
+    styles_selected: List[str],
+    images_per_combo: int,
+    ollama_model: str,
+    enhance_prompts: bool,
+    aspect_ratio: str,
+    quality_preset: str,
+    random_seeds: bool
+) -> str:
+    """Save batch configuration to a JSON file"""
+    if not batch_name.strip():
+        return "Please enter a batch name"
+
+    config = {
+        "batch_name": batch_name,
+        "themes": themes_text,
+        "variations_per_theme": variations_per_theme,
+        "styles": styles_selected,
+        "images_per_combo": images_per_combo,
+        "ollama_model": ollama_model,
+        "enhance_prompts": enhance_prompts,
+        "aspect_ratio": aspect_ratio,
+        "quality_preset": quality_preset,
+        "random_seeds": random_seeds,
+        "saved_at": datetime.now().isoformat()
+    }
+
+    safe_name = "".join(c for c in batch_name[:30] if c.isalnum() or c in " -_").strip().replace(" ", "_")
+    filename = f"{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    filepath = BATCH_CONFIGS_DIR / filename
+
+    with open(filepath, 'w') as f:
+        json.dump(config, f, indent=2)
+
+    return f"Saved: {filename}"
+
+
+def get_saved_batch_configs() -> List[str]:
+    """Get list of saved batch config files"""
+    if not BATCH_CONFIGS_DIR.exists():
+        return []
+    configs = sorted(BATCH_CONFIGS_DIR.glob("*.json"), key=os.path.getmtime, reverse=True)
+    return [f.name for f in configs]
+
+
+def load_batch_config(config_name: str):
+    """Load a saved batch configuration"""
+    if not config_name:
+        return [gr.update()] * 10 + ["No config selected"]
+
+    filepath = BATCH_CONFIGS_DIR / config_name
+    if not filepath.exists():
+        return [gr.update()] * 10 + [f"Config not found: {config_name}"]
+
+    try:
+        with open(filepath, 'r') as f:
+            config = json.load(f)
+
+        return [
+            gr.update(value=config.get('batch_name', '')),
+            gr.update(value=config.get('themes', '')),
+            gr.update(value=config.get('variations_per_theme', 3)),
+            gr.update(value=config.get('styles', [])),
+            gr.update(value=config.get('images_per_combo', 1)),
+            gr.update(value=config.get('ollama_model', 'qwen2.5:7b-instruct')),
+            gr.update(value=config.get('enhance_prompts', True)),
+            gr.update(value=config.get('aspect_ratio', '1:1 (Square)')),
+            gr.update(value=config.get('quality_preset', 'Standard')),
+            gr.update(value=config.get('random_seeds', True)),
+            f"Loaded: {config_name}\nThemes: {len(config.get('themes', '').split(chr(10)))} | Saved: {config.get('saved_at', 'unknown')[:10]}"
+        ]
+    except Exception as e:
+        return [gr.update()] * 10 + [f"Error loading: {e}"]
+
+
+# ============================================================================
+# BATCH GALLERY BROWSER
+# ============================================================================
+
+def get_batch_directories() -> List[str]:
+    """Get list of batch output directories"""
+    batch_dir = OUTPUT_DIR / "batches"
+    if not batch_dir.exists():
+        return ["(No batches yet)"]
+
+    dirs = sorted(
+        [d.name for d in batch_dir.iterdir() if d.is_dir()],
+        reverse=True
+    )
+    return dirs if dirs else ["(No batches yet)"]
+
+
+def get_batch_images(batch_name: str, page: int = 0, per_page: int = 24) -> tuple:
+    """Get images from a specific batch directory with pagination"""
+    if not batch_name or batch_name == "(No batches yet)":
+        return [], "No batch selected", 0, 0
+
+    batch_path = OUTPUT_DIR / "batches" / batch_name
+    if not batch_path.exists():
+        return [], f"Batch not found: {batch_name}", 0, 0
+
+    all_images = sorted(batch_path.glob("*.png"))
+    total_images = len(all_images)
+    total_pages = max(1, (total_images + per_page - 1) // per_page)
+
+    page = max(0, min(page, total_pages - 1))
+    start_idx = page * per_page
+    end_idx = min(start_idx + per_page, total_images)
+
+    page_images = [str(img) for img in all_images[start_idx:end_idx]]
+
+    info = f"Batch: {batch_name}\nImages: {start_idx + 1}-{end_idx} of {total_images} | Page {page + 1}/{total_pages}"
+
+    return page_images, info, page, total_pages
+
+
+def load_image_from_gallery(evt: gr.SelectData, current_batch: str):
+    """Load config from a selected gallery image into the main UI"""
+    if evt is None or evt.value is None:
+        return [gr.update()] * 9 + ["No image selected"]
+
+    # Get the image path from the event
+    if isinstance(evt.value, dict):
+        image_path = evt.value.get('image', {}).get('path', '')
+    elif isinstance(evt.value, str):
+        image_path = evt.value
+    else:
+        image_path = str(evt.value)
+
+    if not image_path:
+        return [gr.update()] * 9 + ["Could not get image path"]
+
+    # Find the corresponding JSON config
+    config_path = Path(image_path).with_suffix('.json')
+
+    if not config_path.exists():
+        # Try to extract info from filename
+        filename = Path(image_path).stem
+        parts = filename.split('_')
+        seed = None
+        for p in parts:
+            if p.startswith('s') and p[1:].isdigit():
+                seed = int(p[1:])
+                break
+
+        return [
+            gr.update(),  # prompt - can't recover
+            gr.update(),  # style
+            gr.update(),  # aspect_ratio
+            gr.update(),  # quality
+            gr.update(),  # steps
+            gr.update(value=seed) if seed else gr.update(),  # seed
+            gr.update(value=False) if seed else gr.update(),  # use_random
+            gr.update(),  # use_ollama
+            gr.update(),  # negative_prompt
+            f"No config file found for this image.\nSeed extracted: {seed if seed else 'unknown'}"
+        ]
+
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+
+        return [
+            gr.update(value=config.get('prompt', '')),
+            gr.update(value=config.get('style', 'None')),
+            gr.update(value=config.get('aspect_ratio', '1:1 (Square)')),
+            gr.update(value=config.get('quality_preset', 'Standard')),
+            gr.update(value=config.get('steps', 20)),
+            gr.update(value=config.get('seed', 0)),
+            gr.update(value=False),  # Uncheck random to use saved seed
+            gr.update(value=config.get('use_ollama', False)),
+            gr.update(value=config.get('negative_prompt', '')),
+            f"Loaded from: {Path(image_path).name}\nPrompt: {config.get('prompt', '')[:80]}...\nSeed: {config.get('seed')}"
+        ]
+    except Exception as e:
+        return [gr.update()] * 9 + [f"Error loading config: {e}"]
+
+
+def refresh_batch_list():
+    """Refresh the list of batch directories"""
+    dirs = get_batch_directories()
+    return gr.update(choices=dirs, value=dirs[0] if dirs else None)
+
+
 def save_image_config(filepath: str, config: dict):
     """Save image configuration as a JSON sidecar file"""
     config_path = Path(filepath).with_suffix('.json')
@@ -1117,141 +1312,223 @@ def create_ui():
             Enter themes (one per line), set variations and styles, and let Ollama + HunyuanImage create a massive batch.
             """)
 
-            with gr.Row():
-                # Left side - Configuration
-                with gr.Column(scale=1):
-                    batch_name = gr.Textbox(
-                        label="Batch Name",
-                        value="my_batch",
-                        placeholder="Name for this batch run"
-                    )
-
-                    batch_themes = gr.Textbox(
-                        label="Themes/Prompts (one per line)",
-                        placeholder="cyberpunk city at night\nunderwater ancient temple\nfantasy forest with magical creatures\nfuturistic space station",
-                        lines=8,
-                        max_lines=20
-                    )
-
+            with gr.Tabs():
+                # Tab 1: Batch Configuration
+                with gr.Tab("Configure Batch"):
                     with gr.Row():
-                        batch_variations = gr.Slider(
-                            label="Variations per theme",
-                            minimum=1,
-                            maximum=20,
-                            value=3,
-                            step=1,
-                            info="Ollama generates this many variations of each theme"
-                        )
-                        batch_images_per = gr.Slider(
-                            label="Images per combo",
-                            minimum=1,
-                            maximum=10,
-                            value=1,
-                            step=1,
-                            info="How many images per prompt+style combination"
-                        )
+                        # Left side - Configuration
+                        with gr.Column(scale=1):
+                            batch_name = gr.Textbox(
+                                label="Batch Name",
+                                value="my_batch",
+                                placeholder="Name for this batch run"
+                            )
 
-                    batch_styles = gr.CheckboxGroup(
-                        label="Styles to apply (select multiple)",
-                        choices=list(STYLE_PRESETS.keys()),
-                        value=["Photorealistic", "Cinematic", "Digital Art"],
-                        info="Each prompt variation will be generated in all selected styles"
-                    )
+                            batch_themes = gr.Textbox(
+                                label="Themes/Prompts (one per line)",
+                                placeholder="cyberpunk city at night\nunderwater ancient temple\nfantasy forest with magical creatures\nfuturistic space station",
+                                lines=8,
+                                max_lines=20
+                            )
 
-                    with gr.Row():
-                        batch_aspect = gr.Dropdown(
-                            label="Aspect Ratio",
-                            choices=list(ASPECT_RATIOS.keys()),
-                            value="1:1 (Square)"
-                        )
-                        batch_quality = gr.Dropdown(
-                            label="Quality",
-                            choices=list(QUALITY_PRESETS.keys()),
-                            value="Standard"
-                        )
+                            with gr.Row():
+                                batch_variations = gr.Slider(
+                                    label="Variations per theme",
+                                    minimum=1,
+                                    maximum=20,
+                                    value=3,
+                                    step=1,
+                                    info="Ollama generates this many variations of each theme"
+                                )
+                                batch_images_per = gr.Slider(
+                                    label="Images per combo",
+                                    minimum=1,
+                                    maximum=10,
+                                    value=1,
+                                    step=1,
+                                    info="How many images per prompt+style combination"
+                                )
 
-                    with gr.Row():
-                        batch_ollama_model = gr.Dropdown(
-                            label="Ollama Model",
-                            choices=get_ollama_models_list() if ollama_available else OLLAMA_MODELS,
-                            value="qwen2.5:7b-instruct"
-                        )
-                        batch_enhance = gr.Checkbox(
-                            label="Enhance prompts",
-                            value=True,
-                            info="Use Ollama to enhance each prompt"
-                        )
+                            batch_styles = gr.CheckboxGroup(
+                                label="Styles to apply (select multiple)",
+                                choices=list(STYLE_PRESETS.keys()),
+                                value=["Photorealistic", "Cinematic", "Digital Art"],
+                                info="Each prompt variation will be generated in all selected styles"
+                            )
 
-                    batch_random_seeds = gr.Checkbox(
-                        label="Random seeds for each image",
-                        value=True
-                    )
+                            with gr.Row():
+                                batch_aspect = gr.Dropdown(
+                                    label="Aspect Ratio",
+                                    choices=list(ASPECT_RATIOS.keys()),
+                                    value="1:1 (Square)"
+                                )
+                                batch_quality = gr.Dropdown(
+                                    label="Quality",
+                                    choices=list(QUALITY_PRESETS.keys()),
+                                    value="Standard"
+                                )
 
-                # Right side - Preview and controls
-                with gr.Column(scale=1):
-                    batch_preview = gr.Markdown(
-                        value="Enter themes and settings to see batch preview..."
-                    )
+                            with gr.Row():
+                                batch_ollama_model = gr.Dropdown(
+                                    label="Ollama Model",
+                                    choices=get_ollama_models_list() if ollama_available else OLLAMA_MODELS,
+                                    value="qwen2.5:7b-instruct"
+                                )
+                                batch_enhance = gr.Checkbox(
+                                    label="Enhance prompts",
+                                    value=True,
+                                    info="Use Ollama to enhance each prompt"
+                                )
 
-                    with gr.Row():
-                        batch_calculate_btn = gr.Button("Calculate Batch", variant="secondary")
-                        batch_start_btn = gr.Button("Start Batch", variant="primary", size="lg")
-                        batch_stop_btn = gr.Button("Stop", variant="stop")
+                            batch_random_seeds = gr.Checkbox(
+                                label="Random seeds for each image",
+                                value=True
+                            )
 
-                    batch_status = gr.Textbox(
-                        label="Status",
-                        value="Ready",
-                        interactive=False,
-                        lines=3
-                    )
+                        # Right side - Preview, controls, and save/load
+                        with gr.Column(scale=1):
+                            batch_preview = gr.Markdown(
+                                value="Enter themes and settings to see batch preview..."
+                            )
 
-                    batch_output_dir = gr.Textbox(
-                        label="Output Directory",
-                        interactive=False
-                    )
+                            with gr.Row():
+                                batch_calculate_btn = gr.Button("Calculate", variant="secondary", size="sm")
+                                batch_start_btn = gr.Button("Start Batch", variant="primary", size="lg")
+                                batch_stop_btn = gr.Button("Stop", variant="stop", size="sm")
 
+                            batch_status = gr.Textbox(
+                                label="Status",
+                                value="Ready",
+                                interactive=False,
+                                lines=3
+                            )
+
+                            batch_output_dir = gr.Textbox(
+                                label="Output Directory",
+                                interactive=False
+                            )
+
+                            # Save/Load batch configs
+                            gr.Markdown("---\n**Save/Load Batch Configuration**")
+                            with gr.Row():
+                                batch_save_btn = gr.Button("Save Config", size="sm")
+                                batch_config_dropdown = gr.Dropdown(
+                                    label="Saved Configs",
+                                    choices=get_saved_batch_configs(),
+                                    value=None,
+                                    allow_custom_value=False
+                                )
+                                batch_load_btn = gr.Button("Load", size="sm")
+                                batch_refresh_configs_btn = gr.Button("↻", size="sm", scale=0)
+
+                            batch_config_status = gr.Textbox(
+                                label="Config Status",
+                                interactive=False,
+                                lines=2
+                            )
+
+                    # Gallery showing current batch progress
+                    gr.Markdown("---\n**Current Batch Progress**")
                     batch_gallery = gr.Gallery(
-                        label="Recent Batch Images",
-                        columns=4,
-                        rows=3,
-                        height=300,
-                        value=get_batch_gallery
+                        label="Generated Images (live update)",
+                        columns=6,
+                        rows=2,
+                        height=200,
+                        object_fit="cover"
                     )
 
-                    batch_refresh_gallery = gr.Button("Refresh Gallery", size="sm")
+                # Tab 2: Browse Batches (Gallery)
+                with gr.Tab("Browse Batches"):
+                    gr.Markdown("**Browse generated batches and click any image to load it into the main generator**")
 
-            # Example batch configurations
-            with gr.Accordion("Example Batch Ideas", open=False):
-                gr.Markdown("""
-                **Quick Examples - Copy these themes:**
+                    with gr.Row():
+                        browse_batch_dropdown = gr.Dropdown(
+                            label="Select Batch",
+                            choices=get_batch_directories(),
+                            value=get_batch_directories()[0] if get_batch_directories() else None,
+                            scale=3
+                        )
+                        browse_refresh_btn = gr.Button("↻ Refresh", size="sm", scale=1)
 
-                **Sci-Fi Collection (5 themes x 3 variations x 3 styles = 45 images):**
-                ```
-                alien planet landscape with two moons
-                cyberpunk street market with neon signs
-                space station orbiting a gas giant
-                android in a futuristic city
-                abandoned spaceship interior
-                ```
+                    browse_info = gr.Textbox(
+                        label="Batch Info",
+                        interactive=False,
+                        lines=2
+                    )
 
-                **Fantasy Collection:**
-                ```
-                dragon flying over a medieval castle
-                enchanted forest with glowing mushrooms
-                wizard tower on a floating island
-                underwater mermaid kingdom
-                magical library with floating books
-                ```
+                    browse_gallery = gr.Gallery(
+                        label="Click an image to load its settings",
+                        columns=6,
+                        rows=4,
+                        height=400,
+                        object_fit="cover",
+                        allow_preview=True
+                    )
 
-                **Portrait Collection:**
-                ```
-                portrait of an elderly wise man
-                young woman with flowers in hair
-                warrior in ornate armor
-                steampunk inventor with goggles
-                ethereal fairy queen
-                ```
-                """)
+                    with gr.Row():
+                        browse_page_state = gr.State(value=0)
+                        browse_total_pages = gr.State(value=1)
+                        browse_prev_btn = gr.Button("← Previous", size="sm")
+                        browse_page_info = gr.Markdown("Page 1 of 1")
+                        browse_next_btn = gr.Button("Next →", size="sm")
+
+                    browse_load_status = gr.Textbox(
+                        label="Load Status",
+                        interactive=False,
+                        lines=3,
+                        placeholder="Click an image above to load its configuration into the main generator..."
+                    )
+
+                # Tab 3: Example Ideas
+                with gr.Tab("Example Ideas"):
+                    gr.Markdown("""
+                    **Quick Examples - Copy these themes:**
+
+                    **Sci-Fi Collection (5 themes x 3 variations x 3 styles = 45 images):**
+                    ```
+                    alien planet landscape with two moons
+                    cyberpunk street market with neon signs
+                    space station orbiting a gas giant
+                    android in a futuristic city
+                    abandoned spaceship interior
+                    ```
+
+                    **Fantasy Collection:**
+                    ```
+                    dragon flying over a medieval castle
+                    enchanted forest with glowing mushrooms
+                    wizard tower on a floating island
+                    underwater mermaid kingdom
+                    magical library with floating books
+                    ```
+
+                    **Portrait Collection:**
+                    ```
+                    portrait of an elderly wise man
+                    young woman with flowers in hair
+                    warrior in ornate armor
+                    steampunk inventor with goggles
+                    ethereal fairy queen
+                    ```
+
+                    **Nature & Landscapes:**
+                    ```
+                    misty mountain peak at sunrise
+                    tropical waterfall in dense jungle
+                    northern lights over frozen lake
+                    desert oasis with palm trees
+                    cherry blossom garden in spring
+                    ```
+
+                    **Architecture & Interiors:**
+                    ```
+                    ancient greek temple ruins
+                    modern minimalist living room
+                    gothic cathedral interior
+                    japanese zen garden with temple
+                    art deco luxury hotel lobby
+                    ```
+                    """)
 
         # Footer
         gr.Markdown("""
@@ -1444,17 +1721,12 @@ def create_ui():
                 batch_random_seeds,
                 batch_name
             ],
-            outputs=[batch_gallery, batch_status, batch_output_dir, batch_gallery]
+            outputs=[gr.State(), batch_status, batch_output_dir, batch_gallery]
         )
 
         batch_stop_btn.click(
             fn=stop_batch,
             outputs=[batch_status]
-        )
-
-        batch_refresh_gallery.click(
-            fn=get_batch_gallery,
-            outputs=[batch_gallery]
         )
 
         # Auto-calculate batch on setting changes
@@ -1464,6 +1736,111 @@ def create_ui():
                 inputs=[batch_themes, batch_variations, batch_styles, batch_images_per],
                 outputs=[batch_preview]
             )
+
+        # ============================================================
+        # BATCH CONFIG SAVE/LOAD HANDLERS
+        # ============================================================
+
+        batch_save_btn.click(
+            fn=save_batch_config,
+            inputs=[
+                batch_name,
+                batch_themes,
+                batch_variations,
+                batch_styles,
+                batch_images_per,
+                batch_ollama_model,
+                batch_enhance,
+                batch_aspect,
+                batch_quality,
+                batch_random_seeds
+            ],
+            outputs=[batch_config_status]
+        )
+
+        batch_load_btn.click(
+            fn=load_batch_config,
+            inputs=[batch_config_dropdown],
+            outputs=[
+                batch_name,
+                batch_themes,
+                batch_variations,
+                batch_styles,
+                batch_images_per,
+                batch_ollama_model,
+                batch_enhance,
+                batch_aspect,
+                batch_quality,
+                batch_random_seeds,
+                batch_config_status
+            ]
+        )
+
+        batch_refresh_configs_btn.click(
+            fn=lambda: gr.update(choices=get_saved_batch_configs()),
+            outputs=[batch_config_dropdown]
+        )
+
+        # ============================================================
+        # BATCH BROWSER HANDLERS
+        # ============================================================
+
+        def update_batch_browser(batch_name, page=0):
+            """Update the batch browser gallery and info"""
+            images, info, current_page, total_pages = get_batch_images(batch_name, page)
+            page_text = f"Page {current_page + 1} of {total_pages}"
+            return images, info, current_page, total_pages, page_text
+
+        def browse_prev_page(batch_name, current_page):
+            """Go to previous page"""
+            new_page = max(0, current_page - 1)
+            return update_batch_browser(batch_name, new_page)
+
+        def browse_next_page(batch_name, current_page, total_pages):
+            """Go to next page"""
+            new_page = min(total_pages - 1, current_page + 1)
+            return update_batch_browser(batch_name, new_page)
+
+        browse_batch_dropdown.change(
+            fn=lambda batch_name: update_batch_browser(batch_name, 0),
+            inputs=[browse_batch_dropdown],
+            outputs=[browse_gallery, browse_info, browse_page_state, browse_total_pages, browse_page_info]
+        )
+
+        browse_refresh_btn.click(
+            fn=refresh_batch_list,
+            outputs=[browse_batch_dropdown]
+        )
+
+        browse_prev_btn.click(
+            fn=browse_prev_page,
+            inputs=[browse_batch_dropdown, browse_page_state],
+            outputs=[browse_gallery, browse_info, browse_page_state, browse_total_pages, browse_page_info]
+        )
+
+        browse_next_btn.click(
+            fn=browse_next_page,
+            inputs=[browse_batch_dropdown, browse_page_state, browse_total_pages],
+            outputs=[browse_gallery, browse_info, browse_page_state, browse_total_pages, browse_page_info]
+        )
+
+        # Click on image in browse gallery to load its config
+        browse_gallery.select(
+            fn=load_image_from_gallery,
+            inputs=[browse_batch_dropdown],
+            outputs=[
+                prompt,
+                style,
+                aspect_ratio,
+                quality_preset,
+                custom_steps,
+                seed,
+                use_random_seed,
+                use_ollama,
+                negative_prompt,
+                browse_load_status
+            ]
+        )
 
     return app
 
