@@ -58,6 +58,120 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 # History file for tracking generations
 HISTORY_FILE = OUTPUT_DIR / "generation_history.json"
 
+# Custom CSS for high-contrast, readable UI
+CUSTOM_CSS = """
+/* Make the overall background darker for contrast */
+body, .gradio-container {
+    background-color: #0b0f19 !important;
+}
+
+/* Fix "Grayed Out" Inputs - Make them clearly editable */
+input, textarea, .gr-input, .gr-box, .gr-form {
+    background-color: #1f2937 !important;
+    border: 1px solid #4b5563 !important;
+    color: #f3f4f6 !important;
+}
+
+/* Style textboxes specifically */
+.gr-textbox textarea, .gr-textbox input {
+    background-color: #1f2937 !important;
+    color: #f3f4f6 !important;
+    border: 1px solid #4b5563 !important;
+}
+
+/* Make placeholders easier to read */
+::placeholder {
+    color: #9ca3af !important;
+    opacity: 1 !important;
+}
+
+/* Improve Dropdowns */
+.secondary-wrap, select, .gr-dropdown {
+    background-color: #1f2937 !important;
+    color: #f3f4f6 !important;
+    border: 1px solid #4b5563 !important;
+}
+
+/* Sliders - make track and handle visible */
+input[type="range"] {
+    background-color: #374151 !important;
+}
+
+/* Make the Gallery background stand out */
+.gallery-container, .gr-gallery {
+    background-color: #111827 !important;
+    border: 2px solid #374151 !important;
+    border-radius: 8px !important;
+}
+
+/* Groups and accordions */
+.gr-group, .gr-accordion {
+    background-color: #111827 !important;
+    border: 1px solid #374151 !important;
+    border-radius: 8px !important;
+}
+
+/* Make primary buttons pop */
+button.primary, .gr-button-primary {
+    background-color: #2563eb !important;
+    color: white !important;
+    font-weight: bold !important;
+    border: none !important;
+}
+button.primary:hover, .gr-button-primary:hover {
+    background-color: #1d4ed8 !important;
+}
+
+/* Secondary buttons */
+button.secondary, .gr-button-secondary {
+    background-color: #374151 !important;
+    color: #f3f4f6 !important;
+    border: 1px solid #4b5563 !important;
+}
+
+/* Stop/danger buttons */
+button.stop, .gr-button-stop {
+    background-color: #dc2626 !important;
+    color: white !important;
+}
+
+/* Labels and text */
+label, .gr-label, .gr-markdown {
+    color: #e5e7eb !important;
+}
+
+/* Tabs */
+.gr-tab-nav button {
+    background-color: #1f2937 !important;
+    color: #9ca3af !important;
+    border: 1px solid #374151 !important;
+}
+.gr-tab-nav button.selected {
+    background-color: #2563eb !important;
+    color: white !important;
+}
+
+/* Checkboxes */
+.gr-checkbox input[type="checkbox"] {
+    accent-color: #2563eb !important;
+}
+
+/* Info text under inputs */
+.gr-info, .info {
+    color: #9ca3af !important;
+}
+
+/* Markdown headers */
+h1, h2, h3, h4 {
+    color: #f3f4f6 !important;
+}
+
+/* Progress bars */
+.progress-bar {
+    background-color: #2563eb !important;
+}
+"""
+
 # Supported image sizes
 IMAGE_SIZES = [
     "auto",
@@ -1194,6 +1308,8 @@ def create_ui():
     """Create and configure the Gradio interface."""
 
     with gr.Blocks(
+        theme=gr.themes.Soft(),
+        css=CUSTOM_CSS,
         title="HunyuanImage-3.0 Generator",
     ) as app:
 
