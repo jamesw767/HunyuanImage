@@ -655,7 +655,7 @@ def run_batch_generation(
 
             # Add negative prompt if provided
             full_prompt = styled_prompt
-            if negative_prompt.strip():
+            if negative_prompt and negative_prompt.strip():
                 full_prompt = f"{styled_prompt} --no {negative_prompt.strip()}"
 
             progress((idx + 1) / total_jobs, desc=f"Generating {idx + 1}/{total_jobs}...")
@@ -693,7 +693,7 @@ def run_batch_generation(
                     "prompt": original_prompt,
                     "processed_prompt": prompt if wildcards_used else None,
                     "styled_prompt": styled_prompt,
-                    "negative_prompt": negative_prompt if negative_prompt.strip() else None,
+                    "negative_prompt": negative_prompt if negative_prompt and negative_prompt.strip() else None,
                     "style": style,
                     "seed": seed,
                     "image_size": image_size,
@@ -1150,7 +1150,7 @@ def generate_image(
 
     try:
         # Determine image size (same for all batch items)
-        if custom_size.strip():
+        if custom_size and custom_size.strip():
             image_size = custom_size.strip()
         else:
             image_size = ASPECT_RATIOS.get(aspect_ratio, "auto")
@@ -1200,7 +1200,7 @@ def generate_image(
 
             # Add negative prompt if provided
             full_prompt = styled_prompt
-            if negative_prompt.strip():
+            if negative_prompt and negative_prompt.strip():
                 full_prompt = f"{styled_prompt}. Avoid: {negative_prompt.strip()}"
 
             progress((batch_idx * 0.9 / batch_count) + 0.05, desc=f"{batch_label}Initializing...")
@@ -1216,7 +1216,7 @@ def generate_image(
                 print(f"[GENERATING IMAGE]")
             print(f"Seed: {current_seed} | Size: {image_size} | Steps: {inference_steps}")
             print(f"Prompt: {full_prompt[:300]}{'...' if len(full_prompt) > 300 else ''}")
-            if negative_prompt.strip():
+            if negative_prompt and negative_prompt.strip():
                 print(f"Negative: {negative_prompt[:100]}{'...' if len(negative_prompt) > 100 else ''}")
             print(f"{'='*60}\n")
 
