@@ -1,0 +1,48 @@
+# Virtual environment
+hunyuan_env/
+
+# Model weights (very large files)
+HunyuanImage-3/
+HunyuanImage3-SDNQ/
+
+# The cloned source repo (already on GitHub)
+HunyuanImage-3.0/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Batch queue database
+batch_queue.db
+
+# Generated outputs (optional - user may want to keep these private)
+outputs/
+
+# PID files
+.ollama_server.pid
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Cache directories
+.hf_cache/
+.pip_cache/
+
+# PID files
+.hunyuan_ui.pid
+
+# Test images
+test_*.png
+
+# Dev notes (optional)
+DEVELOPMENT_PROJECTS.md

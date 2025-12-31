@@ -1,0 +1,37 @@
+{
+  "default_model": "qwen2.5:7b-instruct",
+  "ollama_url": "http://localhost:11434",
+  "enhance_by_default": false,
+  "enhancement_temperature": 0.7,
+  "generation_temperature": 0.8,
+  "available_models": [
+    {
+      "name": "qwen2.5:7b-instruct",
+      "description": "Fast enhancement (4.7GB)",
+      "recommended_for": ["enhancement", "quick_generation"]
+    },
+    {
+      "name": "magistral:24b",
+      "description": "Creative generation (14GB)",
+      "recommended_for": ["creative_prompts", "storytelling"]
+    },
+    {
+      "name": "qwen3-next:80b",
+      "description": "Highest quality (50GB)",
+      "recommended_for": ["complex_prompts", "detailed_scenes"]
+    }
+  ],
+  "batch_settings": {
+    "retry_count": 3,
+    "parallel_enhance": true,
+    "auto_save_interval": 5,
+    "default_steps": 20,
+    "default_aspect_ratio": "1024x1024"
+  },
+  "enhancement_styles": {
+    "cinematic": "Add cinematic lighting, dramatic atmosphere, and movie-like composition",
+    "photorealistic": "Focus on hyperrealistic details, professional photography style",
+    "artistic": "Emphasize artistic interpretation and creative expression",
+    "fantasy": "Include magical elements, epic fantasy atmosphere"
+  }
+}
