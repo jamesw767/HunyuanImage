@@ -933,6 +933,26 @@ def load_custom_batch_directory(custom_path: str):
     return gr.update(), f"No batch folders found in: {path}"
 
 
+def load_batch_from_file(file_path: str):
+    """Load batch directory from a picked file - extracts parent directory"""
+    if not file_path:
+        return gr.update(), gr.update(), "No file selected"
+
+    path = Path(file_path)
+
+    if not path.exists():
+        return gr.update(), gr.update(), f"File not found: {file_path}"
+
+    # Get the parent directory of the file
+    batch_dir = path.parent
+
+    # Load this directory as a batch
+    result = load_custom_batch_directory(str(batch_dir))
+
+    # Also update the textbox with the path
+    return result[0], gr.update(value=str(batch_dir)), result[1]
+
+
 def get_batch_images(batch_name: str, page: int = 0, per_page: int = 24) -> tuple:
     """Get images from a specific batch directory with pagination"""
     global custom_batch_base_dir
@@ -1995,12 +2015,21 @@ def create_ui():
                     with gr.Accordion("Browse External Directory", open=False):
                         gr.Markdown("*Load batches from a different location:*")
                         with gr.Row():
+                            browse_file_picker = gr.File(
+                                label="Pick any image from the batch folder",
+                                file_types=["image"],
+                                type="filepath",
+                                scale=3
+                            )
+                            browse_from_file_btn = gr.Button("Load from File", variant="secondary", size="sm", scale=1)
+                        gr.Markdown("*Or enter path manually:*")
+                        with gr.Row():
                             custom_batch_dir = gr.Textbox(
-                                label="Custom Directory Path",
-                                placeholder="/path/to/your/batch/folder or folder containing batch folders",
+                                label="Directory Path",
+                                placeholder="/path/to/your/batch/folder",
                                 scale=4
                             )
-                            browse_custom_btn = gr.Button("Load Directory", variant="primary", size="sm", scale=1)
+                            browse_custom_btn = gr.Button("Load Path", variant="primary", size="sm", scale=1)
                         custom_browse_status = gr.Textbox(
                             label="Status",
                             interactive=False,
@@ -2397,7 +2426,14 @@ def create_ui():
             outputs=[browse_batch_dropdown]
         )
 
-        # Custom directory browser
+        # Custom directory browser - from file picker
+        browse_from_file_btn.click(
+            fn=load_batch_from_file,
+            inputs=[browse_file_picker],
+            outputs=[browse_batch_dropdown, custom_batch_dir, custom_browse_status]
+        )
+
+        # Custom directory browser - from text path
         browse_custom_btn.click(
             fn=load_custom_batch_directory,
             inputs=[custom_batch_dir],
