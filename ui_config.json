@@ -1,0 +1,76 @@
+{
+  "theme": {
+    "name": "dark",
+    "description": "High-contrast dark theme for better readability"
+  },
+  "colors": {
+    "background": {
+      "main": "#0b0f19",
+      "secondary": "#111827",
+      "input": "#1f2937",
+      "description": "Main page, groups/accordions, and input field backgrounds"
+    },
+    "border": {
+      "default": "#4b5563",
+      "accent": "#374151",
+      "description": "Border colors for inputs and containers"
+    },
+    "text": {
+      "primary": "#f3f4f6",
+      "secondary": "#e5e7eb",
+      "muted": "#9ca3af",
+      "description": "Main text, labels, and placeholder/info text"
+    },
+    "button": {
+      "primary": "#2563eb",
+      "primary_hover": "#1d4ed8",
+      "secondary": "#374151",
+      "danger": "#dc2626",
+      "description": "Generate button, secondary buttons, and stop button"
+    },
+    "accent": {
+      "tab_selected": "#2563eb",
+      "checkbox": "#2563eb",
+      "progress": "#2563eb",
+      "description": "Accent color for selected states and highlights"
+    }
+  },
+  "presets": {
+    "dark": {
+      "background_main": "#0b0f19",
+      "background_secondary": "#111827",
+      "background_input": "#1f2937",
+      "border_default": "#4b5563",
+      "text_primary": "#f3f4f6",
+      "text_muted": "#9ca3af",
+      "button_primary": "#2563eb"
+    },
+    "light": {
+      "background_main": "#ffffff",
+      "background_secondary": "#f9fafb",
+      "background_input": "#ffffff",
+      "border_default": "#d1d5db",
+      "text_primary": "#111827",
+      "text_muted": "#6b7280",
+      "button_primary": "#2563eb"
+    },
+    "midnight": {
+      "background_main": "#020617",
+      "background_secondary": "#0f172a",
+      "background_input": "#1e293b",
+      "border_default": "#334155",
+      "text_primary": "#f8fafc",
+      "text_muted": "#94a3b8",
+      "button_primary": "#6366f1"
+    },
+    "forest": {
+      "background_main": "#022c22",
+      "background_secondary": "#064e3b",
+      "background_input": "#065f46",
+      "border_default": "#047857",
+      "text_primary": "#ecfdf5",
+      "text_muted": "#a7f3d0",
+      "button_primary": "#10b981"
+    }
+  }
+}

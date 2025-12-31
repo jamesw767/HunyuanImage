@@ -58,119 +58,166 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 # History file for tracking generations
 HISTORY_FILE = OUTPUT_DIR / "generation_history.json"
 
-# Custom CSS for high-contrast, readable UI
-CUSTOM_CSS = """
-/* Make the overall background darker for contrast */
-body, .gradio-container {
-    background-color: #0b0f19 !important;
-}
+# UI Configuration file
+UI_CONFIG_FILE = Path(__file__).parent / "ui_config.json"
 
-/* Fix "Grayed Out" Inputs - Make them clearly editable */
-input, textarea, .gr-input, .gr-box, .gr-form {
-    background-color: #1f2937 !important;
-    border: 1px solid #4b5563 !important;
-    color: #f3f4f6 !important;
-}
+def load_ui_colors():
+    """Load UI colors from configuration file."""
+    defaults = {
+        "background_main": "#0b0f19",
+        "background_secondary": "#111827",
+        "background_input": "#1f2937",
+        "border_default": "#4b5563",
+        "border_accent": "#374151",
+        "text_primary": "#f3f4f6",
+        "text_secondary": "#e5e7eb",
+        "text_muted": "#9ca3af",
+        "button_primary": "#2563eb",
+        "button_primary_hover": "#1d4ed8",
+        "button_secondary": "#374151",
+        "button_danger": "#dc2626",
+    }
 
-/* Style textboxes specifically */
-.gr-textbox textarea, .gr-textbox input {
-    background-color: #1f2937 !important;
-    color: #f3f4f6 !important;
-    border: 1px solid #4b5563 !important;
-}
+    if UI_CONFIG_FILE.exists():
+        try:
+            with open(UI_CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+            colors = config.get("colors", {})
+            return {
+                "background_main": colors.get("background", {}).get("main", defaults["background_main"]),
+                "background_secondary": colors.get("background", {}).get("secondary", defaults["background_secondary"]),
+                "background_input": colors.get("background", {}).get("input", defaults["background_input"]),
+                "border_default": colors.get("border", {}).get("default", defaults["border_default"]),
+                "border_accent": colors.get("border", {}).get("accent", defaults["border_accent"]),
+                "text_primary": colors.get("text", {}).get("primary", defaults["text_primary"]),
+                "text_secondary": colors.get("text", {}).get("secondary", defaults["text_secondary"]),
+                "text_muted": colors.get("text", {}).get("muted", defaults["text_muted"]),
+                "button_primary": colors.get("button", {}).get("primary", defaults["button_primary"]),
+                "button_primary_hover": colors.get("button", {}).get("primary_hover", defaults["button_primary_hover"]),
+                "button_secondary": colors.get("button", {}).get("secondary", defaults["button_secondary"]),
+                "button_danger": colors.get("button", {}).get("danger", defaults["button_danger"]),
+            }
+        except Exception as e:
+            print(f"Error loading UI config: {e}, using defaults")
+    return defaults
 
-/* Make placeholders easier to read */
-::placeholder {
-    color: #9ca3af !important;
+
+def generate_custom_css():
+    """Generate CSS from configuration colors."""
+    c = load_ui_colors()
+    return f"""
+/* Main background */
+body, .gradio-container {{
+    background-color: {c['background_main']} !important;
+}}
+
+/* Inputs */
+input, textarea, .gr-input, .gr-box, .gr-form {{
+    background-color: {c['background_input']} !important;
+    border: 1px solid {c['border_default']} !important;
+    color: {c['text_primary']} !important;
+}}
+
+.gr-textbox textarea, .gr-textbox input {{
+    background-color: {c['background_input']} !important;
+    color: {c['text_primary']} !important;
+    border: 1px solid {c['border_default']} !important;
+}}
+
+::placeholder {{
+    color: {c['text_muted']} !important;
     opacity: 1 !important;
-}
+}}
 
-/* Improve Dropdowns */
-.secondary-wrap, select, .gr-dropdown {
-    background-color: #1f2937 !important;
-    color: #f3f4f6 !important;
-    border: 1px solid #4b5563 !important;
-}
+/* Dropdowns */
+.secondary-wrap, select, .gr-dropdown {{
+    background-color: {c['background_input']} !important;
+    color: {c['text_primary']} !important;
+    border: 1px solid {c['border_default']} !important;
+}}
 
-/* Sliders - make track and handle visible */
-input[type="range"] {
-    background-color: #374151 !important;
-}
+/* Sliders */
+input[type="range"] {{
+    background-color: {c['border_accent']} !important;
+}}
 
-/* Make the Gallery background stand out */
-.gallery-container, .gr-gallery {
-    background-color: #111827 !important;
-    border: 2px solid #374151 !important;
+/* Gallery */
+.gallery-container, .gr-gallery {{
+    background-color: {c['background_secondary']} !important;
+    border: 2px solid {c['border_accent']} !important;
     border-radius: 8px !important;
-}
+}}
 
 /* Groups and accordions */
-.gr-group, .gr-accordion {
-    background-color: #111827 !important;
-    border: 1px solid #374151 !important;
+.gr-group, .gr-accordion {{
+    background-color: {c['background_secondary']} !important;
+    border: 1px solid {c['border_accent']} !important;
     border-radius: 8px !important;
-}
+}}
 
-/* Make primary buttons pop */
-button.primary, .gr-button-primary {
-    background-color: #2563eb !important;
+/* Primary buttons */
+button.primary, .gr-button-primary {{
+    background-color: {c['button_primary']} !important;
     color: white !important;
     font-weight: bold !important;
     border: none !important;
-}
-button.primary:hover, .gr-button-primary:hover {
-    background-color: #1d4ed8 !important;
-}
+}}
+button.primary:hover, .gr-button-primary:hover {{
+    background-color: {c['button_primary_hover']} !important;
+}}
 
 /* Secondary buttons */
-button.secondary, .gr-button-secondary {
-    background-color: #374151 !important;
-    color: #f3f4f6 !important;
-    border: 1px solid #4b5563 !important;
-}
+button.secondary, .gr-button-secondary {{
+    background-color: {c['button_secondary']} !important;
+    color: {c['text_primary']} !important;
+    border: 1px solid {c['border_default']} !important;
+}}
 
 /* Stop/danger buttons */
-button.stop, .gr-button-stop {
-    background-color: #dc2626 !important;
+button.stop, .gr-button-stop {{
+    background-color: {c['button_danger']} !important;
     color: white !important;
-}
+}}
 
 /* Labels and text */
-label, .gr-label, .gr-markdown {
-    color: #e5e7eb !important;
-}
+label, .gr-label, .gr-markdown {{
+    color: {c['text_secondary']} !important;
+}}
 
 /* Tabs */
-.gr-tab-nav button {
-    background-color: #1f2937 !important;
-    color: #9ca3af !important;
-    border: 1px solid #374151 !important;
-}
-.gr-tab-nav button.selected {
-    background-color: #2563eb !important;
+.gr-tab-nav button {{
+    background-color: {c['background_input']} !important;
+    color: {c['text_muted']} !important;
+    border: 1px solid {c['border_accent']} !important;
+}}
+.gr-tab-nav button.selected {{
+    background-color: {c['button_primary']} !important;
     color: white !important;
-}
+}}
 
 /* Checkboxes */
-.gr-checkbox input[type="checkbox"] {
-    accent-color: #2563eb !important;
-}
+.gr-checkbox input[type="checkbox"] {{
+    accent-color: {c['button_primary']} !important;
+}}
 
-/* Info text under inputs */
-.gr-info, .info {
-    color: #9ca3af !important;
-}
+/* Info text */
+.gr-info, .info {{
+    color: {c['text_muted']} !important;
+}}
 
-/* Markdown headers */
-h1, h2, h3, h4 {
-    color: #f3f4f6 !important;
-}
+/* Headers */
+h1, h2, h3, h4 {{
+    color: {c['text_primary']} !important;
+}}
 
 /* Progress bars */
-.progress-bar {
-    background-color: #2563eb !important;
-}
+.progress-bar {{
+    background-color: {c['button_primary']} !important;
+}}
 """
+
+# Generate CSS from config
+CUSTOM_CSS = generate_custom_css()
 
 # Supported image sizes
 IMAGE_SIZES = [
@@ -513,6 +560,7 @@ def run_batch_generation(
     batch_name: str,
     ollama_length: str = "medium",
     ollama_complexity: str = "detailed",
+    negative_prompt: str = "",
     progress=gr.Progress()
 ):
     """Run the batch generation process"""
@@ -575,6 +623,7 @@ def run_batch_generation(
                 "images_per_combo": images_per_combo,
                 "aspect_ratio": aspect_ratio,
                 "quality": quality_preset,
+                "negative_prompt": negative_prompt,
                 "ollama_model": ollama_model,
                 "enhance_prompts": enhance_prompts
             },
@@ -604,6 +653,11 @@ def run_batch_generation(
             # Apply style
             styled_prompt = apply_style(prompt, style)
 
+            # Add negative prompt if provided
+            full_prompt = styled_prompt
+            if negative_prompt.strip():
+                full_prompt = f"{styled_prompt} --no {negative_prompt.strip()}"
+
             progress((idx + 1) / total_jobs, desc=f"Generating {idx + 1}/{total_jobs}...")
             yield generated_images, f"Generating {idx + 1}/{total_jobs}: {prompt[:50]}...", f"Output: {batch_dir}", generated_images[-12:] if generated_images else []
 
@@ -611,7 +665,7 @@ def run_batch_generation(
                 start_time = time.time()
 
                 image = model.generate_image(
-                    prompt=styled_prompt,
+                    prompt=full_prompt,
                     seed=seed,
                     image_size=image_size,
                     diff_infer_steps=steps,
@@ -632,6 +686,7 @@ def run_batch_generation(
                     "prompt": original_prompt,
                     "processed_prompt": prompt if wildcards_used else None,
                     "styled_prompt": styled_prompt,
+                    "negative_prompt": negative_prompt if negative_prompt.strip() else None,
                     "style": style,
                     "seed": seed,
                     "image_size": image_size,
@@ -1418,56 +1473,67 @@ def create_ui():
                                         btn = gr.Button(name, size="sm")
                                         btn.click(fn=lambda t=text: t, outputs=prompt)
 
-                # Settings in tabs
-                with gr.Tabs():
-                    with gr.Tab("Size"):
+                # Main Generation Settings (Always Visible)
+                with gr.Group():
+                    gr.Markdown("### Generation Settings")
+                    with gr.Row():
                         aspect_ratio = gr.Dropdown(
                             label="Aspect Ratio",
                             choices=list(ASPECT_RATIOS.keys()),
                             value="1:1 (Square)",
+                            scale=2
                         )
-                        custom_size = gr.Textbox(
-                            label="Custom Size (optional)",
-                            placeholder="e.g., 1024x768",
-                            info="Overrides aspect ratio if set"
-                        )
-
-                    with gr.Tab("Quality"):
                         quality_preset = gr.Radio(
-                            label="Quality Preset",
+                            label="Quality",
                             choices=list(QUALITY_PRESETS.keys()),
                             value="Standard",
+                            scale=3
                         )
-                        gr.Markdown("*Or set custom steps:*")
-                        with gr.Row():
-                            use_custom_steps = gr.Checkbox(
-                                label="Use custom",
-                                value=False,
-                                scale=1
-                            )
-                            custom_steps = gr.Slider(
-                                label="Steps",
-                                minimum=10,
-                                maximum=50,
-                                value=20,
-                                step=1,
-                                scale=3
-                            )
+                    with gr.Row():
+                        use_random_seed = gr.Checkbox(
+                            label="Random Seed",
+                            value=True,
+                            scale=1
+                        )
+                        seed = gr.Number(
+                            label="Seed",
+                            value=0,
+                            precision=0,
+                            scale=2,
+                            interactive=True
+                        )
 
-                    with gr.Tab("Seed"):
-                        with gr.Row():
-                            seed = gr.Number(
-                                label="Seed",
-                                value=0,
-                                precision=0,
-                                scale=2
+                # Advanced settings in tabs
+                with gr.Accordion("Advanced Settings", open=False):
+                    with gr.Tabs():
+                        with gr.Tab("Custom Size"):
+                            custom_size = gr.Textbox(
+                                label="Custom Size (optional)",
+                                placeholder="e.g., 1024x768",
+                                info="Overrides aspect ratio if set"
                             )
-                            use_random_seed = gr.Checkbox(
-                                label="Random",
-                                value=True,
-                                scale=1
-                            )
-                        gr.Markdown("*Same seed + same prompt = same image*")
+                            gr.Markdown("*Leave blank to use the Aspect Ratio above*")
+
+                        with gr.Tab("Custom Steps"):
+                            gr.Markdown("*Override the Quality preset with custom steps:*")
+                            with gr.Row():
+                                use_custom_steps = gr.Checkbox(
+                                    label="Use custom steps",
+                                    value=False,
+                                    scale=1
+                                )
+                                custom_steps = gr.Slider(
+                                    label="Steps",
+                                    minimum=10,
+                                    maximum=50,
+                                    value=20,
+                                    step=1,
+                                    scale=3
+                                )
+
+                        with gr.Tab("Seed Info"):
+                            gr.Markdown("*Same seed + same prompt = same image*")
+                            gr.Markdown("Use the Seed field above to reproduce specific images.")
 
                     with gr.Tab("Ollama"):
                         with gr.Group():
@@ -1690,8 +1756,15 @@ def create_ui():
                             batch_themes = gr.Textbox(
                                 label="Themes/Prompts (one per line)",
                                 placeholder="cyberpunk city at night\nunderwater ancient temple\nfantasy forest with magical creatures\nfuturistic space station",
-                                lines=8,
+                                lines=6,
                                 max_lines=20
+                            )
+
+                            batch_negative_prompt = gr.Textbox(
+                                label="Negative Prompt (applied to all images)",
+                                placeholder="blurry, low quality, distorted, ugly, bad anatomy, watermark, text",
+                                lines=2,
+                                info="What to avoid in all generated images"
                             )
 
                             with gr.Row():
@@ -2123,6 +2196,7 @@ def create_ui():
                 batch_name,
                 batch_ollama_length,
                 batch_ollama_complexity,
+                batch_negative_prompt,
             ],
             outputs=[gr.State(), batch_status, batch_output_dir, batch_gallery]
         )
