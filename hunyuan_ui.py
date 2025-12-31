@@ -476,6 +476,22 @@ def run_batch_generation(
                 filepath = batch_dir / filename
                 image.save(filepath)
 
+                # Save config JSON for this image
+                config = {
+                    "prompt": prompt,
+                    "styled_prompt": styled_prompt,
+                    "style": style,
+                    "seed": seed,
+                    "image_size": image_size,
+                    "aspect_ratio": aspect_ratio,
+                    "steps": steps,
+                    "quality_preset": quality_preset,
+                    "batch_name": batch_name,
+                    "batch_index": idx + 1,
+                    "generation_time": gen_time
+                }
+                save_image_config(str(filepath), config)
+
                 generated_images.append(str(filepath))
                 batch_results.append({
                     "index": idx + 1,
@@ -534,6 +550,52 @@ def get_batch_gallery():
             images.extend(sorted(batch.glob("*.png"))[:20])
 
     return [str(img) for img in images[:48]]
+
+
+def save_image_config(filepath: str, config: dict):
+    """Save image configuration as a JSON sidecar file"""
+    config_path = Path(filepath).with_suffix('.json')
+    config['image_path'] = str(filepath)
+    config['created_at'] = datetime.now().isoformat()
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2)
+    return str(config_path)
+
+
+def load_image_config(config_path: str) -> dict:
+    """Load image configuration from JSON file"""
+    try:
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def load_config_to_ui(config_file):
+    """Load a config file and return values for UI components"""
+    if not config_file:
+        return [gr.update()] * 8 + ["No file selected"]
+
+    try:
+        config = load_image_config(config_file.name if hasattr(config_file, 'name') else config_file)
+
+        if "error" in config:
+            return [gr.update()] * 8 + [f"Error: {config['error']}"]
+
+        # Return updates for: prompt, style, aspect_ratio, quality, steps, seed, use_random, use_ollama, status
+        return [
+            gr.update(value=config.get('prompt', '')),
+            gr.update(value=config.get('style', 'None')),
+            gr.update(value=config.get('aspect_ratio', '1:1 (Square)')),
+            gr.update(value=config.get('quality_preset', 'Standard')),
+            gr.update(value=config.get('steps', 20)),
+            gr.update(value=config.get('seed', 0)),
+            gr.update(value=False),  # Uncheck random seed to use the saved seed
+            gr.update(value=config.get('use_ollama', False)),
+            f"Loaded config from: {config.get('image_path', 'unknown')}\nSeed: {config.get('seed')}"
+        ]
+    except Exception as e:
+        return [gr.update()] * 8 + [f"Error loading config: {e}"]
 
 
 def save_to_history(prompt: str, seed: int, image_size: str, steps: int,
@@ -651,7 +713,25 @@ def generate_image(
 
         if save_image:
             image.save(filepath)
-            save_status = f"Saved: {filename}"
+
+            # Save config JSON sidecar for recreating this image
+            config = {
+                "prompt": prompt,
+                "styled_prompt": styled_prompt,
+                "style": style,
+                "negative_prompt": negative_prompt,
+                "seed": seed,
+                "image_size": image_size,
+                "aspect_ratio": aspect_ratio,
+                "steps": inference_steps,
+                "quality_preset": quality_preset,
+                "use_ollama": use_ollama,
+                "ollama_model": ollama_model if use_ollama else None,
+                "generation_time": generation_time
+            }
+            config_path = save_image_config(str(filepath), config)
+
+            save_status = f"Saved: {filename}\nConfig: {Path(config_path).name}"
             save_to_history(prompt, seed, image_size, inference_steps,
                           str(filepath), generation_time, style)
         else:
@@ -902,11 +982,25 @@ def create_ui():
                             **Popular models:** `llama3.2:3b` (2GB), `mistral:7b` (4GB), `gemma2:9b` (5GB), `qwen2.5:14b` (9GB)
                             """)
 
-                # Save option
+                # Save option and Load config
                 save_image = gr.Checkbox(
-                    label="Auto-save to outputs folder",
+                    label="Auto-save images (with JSON config for recreating)",
                     value=True,
                 )
+
+                with gr.Accordion("Load Saved Config", open=False):
+                    config_file = gr.File(
+                        label="Select .json config file",
+                        file_types=[".json"],
+                        type="filepath"
+                    )
+                    load_config_btn = gr.Button("Load Config", size="sm")
+                    load_config_status = gr.Textbox(
+                        label="Status",
+                        interactive=False,
+                        lines=2
+                    )
+                    gr.Markdown("*Each saved image has a .json file with the same name. Load it to recreate the image.*")
 
                 # Generate buttons
                 gr.Markdown("### Generate")
@@ -1260,6 +1354,23 @@ def create_ui():
         refresh_btn.click(
             fn=refresh_gallery,
             outputs=gallery,
+        )
+
+        # Load config handler
+        load_config_btn.click(
+            fn=load_config_to_ui,
+            inputs=[config_file],
+            outputs=[
+                prompt,
+                style,
+                aspect_ratio,
+                quality_preset,
+                custom_steps,
+                seed,
+                use_random_seed,
+                use_ollama,
+                load_config_status
+            ]
         )
 
         # Prompt generator handlers
