@@ -262,6 +262,280 @@ def delete_ollama_model(model_name: str):
     return msg, gr.update(choices=models, value=models[0] if models else None)
 
 
+# ============================================================================
+# BATCH GENERATION SYSTEM
+# ============================================================================
+
+# Global batch state
+batch_running = False
+batch_stop_requested = False
+batch_results = []
+
+def calculate_batch_total(themes_text: str, variations_per_theme: int,
+                          styles_selected: List[str], images_per_combo: int) -> str:
+    """Calculate total images that will be generated"""
+    themes = [t.strip() for t in themes_text.strip().split('\n') if t.strip()]
+    num_themes = len(themes) if themes else 0
+    num_styles = len(styles_selected) if styles_selected else 1
+
+    # Each theme generates variations, each variation gets each style, each combo gets N images
+    total_variations = num_themes * variations_per_theme
+    total_combos = total_variations * num_styles
+    total_images = total_combos * images_per_combo
+
+    # Estimate time (roughly 90 seconds per image)
+    est_minutes = (total_images * 90) / 60
+    est_hours = est_minutes / 60
+
+    if est_hours >= 1:
+        time_str = f"~{est_hours:.1f} hours"
+    else:
+        time_str = f"~{est_minutes:.0f} minutes"
+
+    return f"""**Batch Summary:**
+- Themes/Prompts: {num_themes}
+- Variations per theme: {variations_per_theme}
+- Styles: {num_styles}
+- Images per combination: {images_per_combo}
+
+**Total images to generate: {total_images}**
+Estimated time: {time_str}"""
+
+
+def generate_batch_prompts(themes_text: str, variations_per_theme: int,
+                           styles_selected: List[str], ollama_model: str,
+                           enhance_prompts: bool) -> List[dict]:
+    """Generate all prompt combinations for batch"""
+    global ollama_generator, ollama_enhancer
+
+    themes = [t.strip() for t in themes_text.strip().split('\n') if t.strip()]
+    if not themes:
+        return []
+
+    all_prompts = []
+
+    # Initialize Ollama if needed
+    if ollama_available and (variations_per_theme > 1 or enhance_prompts):
+        if ollama_generator is None:
+            ollama_generator = PromptGenerator(model=ollama_model)
+        if ollama_enhancer is None:
+            ollama_enhancer = PromptEnhancer(model=ollama_model)
+
+    for theme in themes:
+        # Generate variations using Ollama
+        if variations_per_theme > 1 and ollama_available and ollama_generator:
+            try:
+                variations = ollama_generator.generate_themed_prompts(
+                    theme, count=variations_per_theme, temperature=0.85
+                )
+            except Exception as e:
+                variations = [theme]  # Fall back to original
+        else:
+            variations = [theme]
+
+        # Enhance each variation if requested
+        if enhance_prompts and ollama_available and ollama_enhancer:
+            enhanced_variations = []
+            for v in variations:
+                try:
+                    enhanced = ollama_enhancer.enhance(v, temperature=0.7)
+                    enhanced_variations.append(enhanced)
+                except:
+                    enhanced_variations.append(v)
+            variations = enhanced_variations
+
+        # Create combinations with styles
+        styles = styles_selected if styles_selected else ["None"]
+        for variation in variations:
+            for style in styles:
+                all_prompts.append({
+                    "prompt": variation,
+                    "style": style,
+                    "original_theme": theme
+                })
+
+    return all_prompts
+
+
+def run_batch_generation(
+    themes_text: str,
+    variations_per_theme: int,
+    styles_selected: List[str],
+    images_per_combo: int,
+    ollama_model: str,
+    enhance_prompts: bool,
+    aspect_ratio: str,
+    quality_preset: str,
+    random_seeds: bool,
+    batch_name: str,
+    progress=gr.Progress()
+):
+    """Run the batch generation process"""
+    global model, model_loaded, batch_running, batch_stop_requested, batch_results
+
+    if not model_loaded:
+        yield [], "Please load the model first!", "", []
+        return
+
+    if batch_running:
+        yield [], "A batch is already running!", "", []
+        return
+
+    batch_running = True
+    batch_stop_requested = False
+    batch_results = []
+
+    try:
+        # Create batch output directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_name = "".join(c for c in batch_name[:20] if c.isalnum() or c in " -_").strip().replace(" ", "_")
+        batch_dir = OUTPUT_DIR / "batches" / f"{safe_name}_{timestamp}"
+        batch_dir.mkdir(parents=True, exist_ok=True)
+
+        progress(0, desc="Generating prompts with Ollama...")
+        yield [], "Generating prompt variations with Ollama...", "", []
+
+        # Generate all prompt combinations
+        prompts = generate_batch_prompts(
+            themes_text, variations_per_theme, styles_selected,
+            ollama_model, enhance_prompts
+        )
+
+        if not prompts:
+            yield [], "No prompts generated. Please enter at least one theme.", "", []
+            batch_running = False
+            return
+
+        # Expand for images_per_combo
+        all_jobs = []
+        for p in prompts:
+            for i in range(images_per_combo):
+                all_jobs.append({**p, "combo_index": i})
+
+        total_jobs = len(all_jobs)
+
+        # Get settings
+        image_size = ASPECT_RATIOS.get(aspect_ratio, "1024x1024")
+        steps = QUALITY_PRESETS.get(quality_preset, {}).get("steps", 20)
+
+        # Save batch manifest
+        manifest = {
+            "batch_name": batch_name,
+            "created_at": datetime.now().isoformat(),
+            "total_images": total_jobs,
+            "settings": {
+                "themes": themes_text.split('\n'),
+                "variations_per_theme": variations_per_theme,
+                "styles": styles_selected,
+                "images_per_combo": images_per_combo,
+                "aspect_ratio": aspect_ratio,
+                "quality": quality_preset,
+                "ollama_model": ollama_model,
+                "enhance_prompts": enhance_prompts
+            },
+            "prompts": prompts
+        }
+        with open(batch_dir / "manifest.json", 'w') as f:
+            json.dump(manifest, f, indent=2)
+
+        generated_images = []
+
+        for idx, job in enumerate(all_jobs):
+            if batch_stop_requested:
+                yield generated_images, f"Batch stopped at {idx}/{total_jobs}", f"Output: {batch_dir}", generated_images[-12:] if generated_images else []
+                break
+
+            prompt = job["prompt"]
+            style = job["style"]
+
+            # Apply style
+            styled_prompt = apply_style(prompt, style)
+
+            # Generate seed
+            seed = random.randint(0, 2**32 - 1) if random_seeds else (idx * 12345) % (2**32)
+
+            progress((idx + 1) / total_jobs, desc=f"Generating {idx + 1}/{total_jobs}...")
+            yield generated_images, f"Generating {idx + 1}/{total_jobs}: {prompt[:50]}...", f"Output: {batch_dir}", generated_images[-12:] if generated_images else []
+
+            try:
+                start_time = time.time()
+
+                image = model.generate_image(
+                    prompt=styled_prompt,
+                    seed=seed,
+                    image_size=image_size,
+                    diff_infer_steps=steps,
+                    stream=True,
+                )
+
+                gen_time = time.time() - start_time
+
+                # Save image
+                safe_prompt = "".join(c for c in prompt[:30] if c.isalnum() or c in " -_").strip().replace(" ", "_")
+                filename = f"{idx+1:04d}_{safe_prompt}_s{seed}.png"
+                filepath = batch_dir / filename
+                image.save(filepath)
+
+                generated_images.append(str(filepath))
+                batch_results.append({
+                    "index": idx + 1,
+                    "prompt": prompt,
+                    "style": style,
+                    "seed": seed,
+                    "filepath": str(filepath),
+                    "generation_time": gen_time
+                })
+
+            except Exception as e:
+                batch_results.append({
+                    "index": idx + 1,
+                    "prompt": prompt,
+                    "style": style,
+                    "error": str(e)
+                })
+
+        # Save results
+        with open(batch_dir / "results.json", 'w') as f:
+            json.dump(batch_results, f, indent=2)
+
+        completed = len([r for r in batch_results if "filepath" in r])
+        failed = len([r for r in batch_results if "error" in r])
+
+        final_status = f"Batch complete! {completed} images generated"
+        if failed > 0:
+            final_status += f", {failed} failed"
+        final_status += f"\nOutput: {batch_dir}"
+
+        yield generated_images, final_status, str(batch_dir), generated_images[-12:] if generated_images else []
+
+    except Exception as e:
+        yield [], f"Batch error: {str(e)}", "", []
+    finally:
+        batch_running = False
+
+
+def stop_batch():
+    """Stop the running batch"""
+    global batch_stop_requested
+    batch_stop_requested = True
+    return "Stop requested... finishing current image"
+
+
+def get_batch_gallery():
+    """Get recent batch images"""
+    batch_dir = OUTPUT_DIR / "batches"
+    if not batch_dir.exists():
+        return []
+
+    # Get all images from recent batches
+    images = []
+    for batch in sorted(batch_dir.iterdir(), reverse=True)[:5]:
+        if batch.is_dir():
+            images.extend(sorted(batch.glob("*.png"))[:20])
+
+    return [str(img) for img in images[:48]]
+
+
 def save_to_history(prompt: str, seed: int, image_size: str, steps: int,
                     filepath: str, generation_time: float, style: str):
     """Save generation details to history."""
@@ -741,6 +1015,150 @@ def create_ui():
                         use_first_btn = gr.Button("Use First Prompt", size="sm")
                         gr.Markdown("*Click a generated prompt to copy it above*")
 
+        # Batch Generation Tab
+        with gr.Accordion("Batch Generation (Mass Image Creation)", open=False):
+            gr.Markdown("""
+            **Generate hundreds of images with mixed themes, styles, and variations**
+
+            Enter themes (one per line), set variations and styles, and let Ollama + HunyuanImage create a massive batch.
+            """)
+
+            with gr.Row():
+                # Left side - Configuration
+                with gr.Column(scale=1):
+                    batch_name = gr.Textbox(
+                        label="Batch Name",
+                        value="my_batch",
+                        placeholder="Name for this batch run"
+                    )
+
+                    batch_themes = gr.Textbox(
+                        label="Themes/Prompts (one per line)",
+                        placeholder="cyberpunk city at night\nunderwater ancient temple\nfantasy forest with magical creatures\nfuturistic space station",
+                        lines=8,
+                        max_lines=20
+                    )
+
+                    with gr.Row():
+                        batch_variations = gr.Slider(
+                            label="Variations per theme",
+                            minimum=1,
+                            maximum=20,
+                            value=3,
+                            step=1,
+                            info="Ollama generates this many variations of each theme"
+                        )
+                        batch_images_per = gr.Slider(
+                            label="Images per combo",
+                            minimum=1,
+                            maximum=10,
+                            value=1,
+                            step=1,
+                            info="How many images per prompt+style combination"
+                        )
+
+                    batch_styles = gr.CheckboxGroup(
+                        label="Styles to apply (select multiple)",
+                        choices=list(STYLE_PRESETS.keys()),
+                        value=["Photorealistic", "Cinematic", "Digital Art"],
+                        info="Each prompt variation will be generated in all selected styles"
+                    )
+
+                    with gr.Row():
+                        batch_aspect = gr.Dropdown(
+                            label="Aspect Ratio",
+                            choices=list(ASPECT_RATIOS.keys()),
+                            value="1:1 (Square)"
+                        )
+                        batch_quality = gr.Dropdown(
+                            label="Quality",
+                            choices=list(QUALITY_PRESETS.keys()),
+                            value="Standard"
+                        )
+
+                    with gr.Row():
+                        batch_ollama_model = gr.Dropdown(
+                            label="Ollama Model",
+                            choices=get_ollama_models_list() if ollama_available else OLLAMA_MODELS,
+                            value="qwen2.5:7b-instruct"
+                        )
+                        batch_enhance = gr.Checkbox(
+                            label="Enhance prompts",
+                            value=True,
+                            info="Use Ollama to enhance each prompt"
+                        )
+
+                    batch_random_seeds = gr.Checkbox(
+                        label="Random seeds for each image",
+                        value=True
+                    )
+
+                # Right side - Preview and controls
+                with gr.Column(scale=1):
+                    batch_preview = gr.Markdown(
+                        value="Enter themes and settings to see batch preview..."
+                    )
+
+                    with gr.Row():
+                        batch_calculate_btn = gr.Button("Calculate Batch", variant="secondary")
+                        batch_start_btn = gr.Button("Start Batch", variant="primary", size="lg")
+                        batch_stop_btn = gr.Button("Stop", variant="stop")
+
+                    batch_status = gr.Textbox(
+                        label="Status",
+                        value="Ready",
+                        interactive=False,
+                        lines=3
+                    )
+
+                    batch_output_dir = gr.Textbox(
+                        label="Output Directory",
+                        interactive=False
+                    )
+
+                    batch_gallery = gr.Gallery(
+                        label="Recent Batch Images",
+                        columns=4,
+                        rows=3,
+                        height=300,
+                        value=get_batch_gallery
+                    )
+
+                    batch_refresh_gallery = gr.Button("Refresh Gallery", size="sm")
+
+            # Example batch configurations
+            with gr.Accordion("Example Batch Ideas", open=False):
+                gr.Markdown("""
+                **Quick Examples - Copy these themes:**
+
+                **Sci-Fi Collection (5 themes x 3 variations x 3 styles = 45 images):**
+                ```
+                alien planet landscape with two moons
+                cyberpunk street market with neon signs
+                space station orbiting a gas giant
+                android in a futuristic city
+                abandoned spaceship interior
+                ```
+
+                **Fantasy Collection:**
+                ```
+                dragon flying over a medieval castle
+                enchanted forest with glowing mushrooms
+                wizard tower on a floating island
+                underwater mermaid kingdom
+                magical library with floating books
+                ```
+
+                **Portrait Collection:**
+                ```
+                portrait of an elderly wise man
+                young woman with flowers in hair
+                warrior in ornate armor
+                steampunk inventor with goggles
+                ethereal fairy queen
+                ```
+                """)
+
         # Footer
         gr.Markdown("""
         ---
@@ -748,9 +1166,8 @@ def create_ui():
         - Be descriptive for better results
         - Use style presets to quickly change the artistic direction
         - Save the seed to recreate or create variations of images you like
-        - "Create Variation" generates a similar but different image
         - Enable "Ollama" tab to enhance prompts with local LLM
-        - Use "Prompt Generator" to create themed prompt collections
+        - Use "Batch Generation" to create hundreds of images with mixed themes, styles, and variations
 
         **Links:** [HunyuanImage-3.0](https://huggingface.co/tencent/HunyuanImage-3.0) |
         [Quantized Model](https://huggingface.co/Disty0/HunyuanImage3-SDNQ-uint4-svd-r32)
@@ -894,6 +1311,48 @@ def create_ui():
             ],
             outputs=[output_image, status_text, info_text, last_seed],
         )
+
+        # Batch generation handlers
+        batch_calculate_btn.click(
+            fn=calculate_batch_total,
+            inputs=[batch_themes, batch_variations, batch_styles, batch_images_per],
+            outputs=[batch_preview]
+        )
+
+        batch_start_btn.click(
+            fn=run_batch_generation,
+            inputs=[
+                batch_themes,
+                batch_variations,
+                batch_styles,
+                batch_images_per,
+                batch_ollama_model,
+                batch_enhance,
+                batch_aspect,
+                batch_quality,
+                batch_random_seeds,
+                batch_name
+            ],
+            outputs=[batch_gallery, batch_status, batch_output_dir, batch_gallery]
+        )
+
+        batch_stop_btn.click(
+            fn=stop_batch,
+            outputs=[batch_status]
+        )
+
+        batch_refresh_gallery.click(
+            fn=get_batch_gallery,
+            outputs=[batch_gallery]
+        )
+
+        # Auto-calculate batch on setting changes
+        for component in [batch_themes, batch_variations, batch_styles, batch_images_per]:
+            component.change(
+                fn=calculate_batch_total,
+                inputs=[batch_themes, batch_variations, batch_styles, batch_images_per],
+                outputs=[batch_preview]
+            )
 
     return app
 
