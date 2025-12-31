@@ -91,34 +91,20 @@ class PromptGenerator:
         theme: str,
         count: int = 10,
         style: Optional[str] = None,
-        temperature: float = 0.8
+        temperature: float = 0.8,
+        length: str = "medium",
+        complexity: str = "detailed"
     ) -> List[str]:
         """Generate prompts for a theme"""
-        style_instruction = ""
-        if style:
-            style_instruction = f"Preferred artistic style: {style}"
-
-        prompt = THEME_GENERATION_PROMPT.format(
-            count=count,
+        # Use the PromptEnhancer's generate_prompts which supports length/complexity
+        return self.enhancer.generate_prompts(
             theme=theme,
-            style_instruction=style_instruction
-        )
-
-        response = self.client.generate(
-            prompt=prompt,
+            count=count,
+            style=style,
             temperature=temperature,
-            max_tokens=count * 250
+            length=length,
+            complexity=complexity
         )
-
-        # Parse prompts (split by double newlines)
-        prompts = [p.strip() for p in response.text.split('\n\n') if p.strip()]
-
-        # If we got fewer prompts than expected, try splitting by single newlines
-        if len(prompts) < count:
-            prompts = [p.strip() for p in response.text.split('\n') if p.strip() and len(p) > 30]
-
-        logger.info(f"Generated {len(prompts)} prompts for theme: {theme}")
-        return prompts[:count]
 
     def generate_character_scenes(
         self,

@@ -164,7 +164,8 @@ def init_ollama(model_name: str = "qwen2.5:7b-instruct"):
         return f"Ollama init error: {e}"
 
 
-def enhance_with_ollama(prompt: str, model_name: str, style: str = None) -> str:
+def enhance_with_ollama(prompt: str, model_name: str, style: str = None,
+                        length: str = "medium", complexity: str = "detailed") -> str:
     """Enhance a prompt using Ollama"""
     global ollama_enhancer
     if not ollama_available:
@@ -172,13 +173,19 @@ def enhance_with_ollama(prompt: str, model_name: str, style: str = None) -> str:
     try:
         if ollama_enhancer is None:
             ollama_enhancer = PromptEnhancer(model=model_name)
-        enhanced = ollama_enhancer.enhance(prompt, style=style if style != "None" else None)
-        return enhanced, "Enhanced successfully"
+        enhanced = ollama_enhancer.enhance(
+            prompt,
+            style=style if style != "None" else None,
+            length=length,
+            complexity=complexity
+        )
+        return enhanced, f"Enhanced ({length}/{complexity})"
     except Exception as e:
         return prompt, f"Enhancement failed: {e}"
 
 
-def generate_prompts_ollama(theme: str, count: int, model_name: str, style: str = None) -> List[str]:
+def generate_prompts_ollama(theme: str, count: int, model_name: str, style: str = None,
+                            length: str = "medium", complexity: str = "detailed") -> List[str]:
     """Generate prompts using Ollama"""
     global ollama_generator
     if not ollama_available:
@@ -187,7 +194,11 @@ def generate_prompts_ollama(theme: str, count: int, model_name: str, style: str 
         if ollama_generator is None:
             ollama_generator = PromptGenerator(model=model_name)
         prompts = ollama_generator.generate_themed_prompts(
-            theme, count=count, style=style if style != "None" else None
+            theme,
+            count=count,
+            style=style if style != "None" else None,
+            length=length,
+            complexity=complexity
         )
         return prompts
     except Exception as e:
@@ -316,7 +327,9 @@ Estimated time: {time_str}"""
 
 def generate_batch_prompts(themes_text: str, variations_per_theme: int,
                            styles_selected: List[str], ollama_model: str,
-                           enhance_prompts: bool) -> List[dict]:
+                           enhance_prompts: bool,
+                           ollama_length: str = "medium",
+                           ollama_complexity: str = "detailed") -> List[dict]:
     """Generate all prompt combinations for batch"""
     global ollama_generator, ollama_enhancer
 
@@ -338,7 +351,8 @@ def generate_batch_prompts(themes_text: str, variations_per_theme: int,
         if variations_per_theme > 1 and ollama_available and ollama_generator:
             try:
                 variations = ollama_generator.generate_themed_prompts(
-                    theme, count=variations_per_theme, temperature=0.85
+                    theme, count=variations_per_theme, temperature=0.85,
+                    length=ollama_length, complexity=ollama_complexity
                 )
             except Exception as e:
                 variations = [theme]  # Fall back to original
@@ -350,7 +364,10 @@ def generate_batch_prompts(themes_text: str, variations_per_theme: int,
             enhanced_variations = []
             for v in variations:
                 try:
-                    enhanced = ollama_enhancer.enhance(v, temperature=0.7)
+                    enhanced = ollama_enhancer.enhance(
+                        v, temperature=0.7,
+                        length=ollama_length, complexity=ollama_complexity
+                    )
                     enhanced_variations.append(enhanced)
                 except:
                     enhanced_variations.append(v)
@@ -380,6 +397,8 @@ def run_batch_generation(
     quality_preset: str,
     random_seeds: bool,
     batch_name: str,
+    ollama_length: str = "medium",
+    ollama_complexity: str = "detailed",
     progress=gr.Progress()
 ):
     """Run the batch generation process"""
@@ -405,12 +424,12 @@ def run_batch_generation(
         batch_dir.mkdir(parents=True, exist_ok=True)
 
         progress(0, desc="Generating prompts with Ollama...")
-        yield [], "Generating prompt variations with Ollama...", "", []
+        yield [], f"Generating prompt variations with Ollama ({ollama_length}/{ollama_complexity})...", "", []
 
         # Generate all prompt combinations
         prompts = generate_batch_prompts(
             themes_text, variations_per_theme, styles_selected,
-            ollama_model, enhance_prompts
+            ollama_model, enhance_prompts, ollama_length, ollama_complexity
         )
 
         if not prompts:
@@ -718,6 +737,13 @@ def load_image_from_gallery(evt: gr.SelectData, current_batch: str):
     # Find the corresponding JSON config
     config_path = Path(image_path).with_suffix('.json')
 
+    # If config not found at direct path (e.g., Gradio temp path),
+    # try to find it in the actual batch directory
+    if not config_path.exists() and current_batch and current_batch != "(No batches yet)":
+        filename = Path(image_path).stem
+        batch_dir = OUTPUT_DIR / "batches" / current_batch
+        config_path = batch_dir / f"{filename}.json"
+
     if not config_path.exists():
         # Try to extract info from filename
         filename = Path(image_path).stem
@@ -854,9 +880,12 @@ def generate_image(
     save_image: bool,
     use_ollama: bool = False,
     ollama_model: str = "qwen2.5:7b-instruct",
+    batch_count: int = 1,
+    ollama_length: str = "medium",
+    ollama_complexity: str = "detailed",
     progress=gr.Progress()
 ):
-    """Generate an image from the text prompt."""
+    """Generate an image from the text prompt. Supports batch generation."""
     global model, model_loaded
 
     if not model_loaded:
@@ -867,127 +896,162 @@ def generate_image(
         yield None, "Please enter a prompt!", "", None
         return
 
-    try:
-        # Handle seed
-        if use_random_seed:
-            seed = random.randint(0, 2**32 - 1)
+    batch_count = int(batch_count)
+    original_prompt = prompt.strip()
 
-        # Determine image size
+    try:
+        # Determine image size (same for all batch items)
         if custom_size.strip():
             image_size = custom_size.strip()
         else:
             image_size = ASPECT_RATIOS.get(aspect_ratio, "auto")
 
-        # Get inference steps
+        # Get inference steps (same for all batch items)
         if use_custom_steps:
             inference_steps = custom_steps
         else:
             inference_steps = QUALITY_PRESETS.get(quality_preset, {}).get("steps", 20)
 
-        # Process wildcards if available
-        original_prompt = prompt.strip()
-        processed_prompt = original_prompt
-        wildcards_used = False
+        last_image = None
+        last_seed = seed
+        all_info = []
 
-        if wildcard_available and wildcard_manager:
-            if wildcard_manager.has_wildcards(original_prompt):
-                wildcards_used = True
-                progress(0.01, desc="Processing wildcards...")
-                yield None, "Processing wildcards...", "", seed
-                processed_prompt = wildcard_manager.process_prompt(original_prompt, seed=seed)
+        for batch_idx in range(batch_count):
+            batch_label = f"[{batch_idx + 1}/{batch_count}] " if batch_count > 1 else ""
 
-        # Apply style to prompt
-        styled_prompt = apply_style(processed_prompt, style)
+            # Handle seed - generate new random seed for each batch item if random is enabled
+            if use_random_seed:
+                current_seed = random.randint(0, 2**32 - 1)
+            else:
+                # Use provided seed + offset for subsequent images in batch
+                current_seed = (int(seed) + batch_idx) % (2**32)
 
-        # Enhance with Ollama if enabled
-        if use_ollama and ollama_available:
-            progress(0.02, desc="Enhancing prompt with Ollama...")
-            yield None, f"Enhancing prompt with {ollama_model}...", "", seed
-            styled_prompt, enhance_status = enhance_with_ollama(styled_prompt, ollama_model, style)
+            # Process wildcards if available - fresh random for each batch item
+            processed_prompt = original_prompt
+            wildcards_used = False
 
-        # Add negative prompt if provided
-        full_prompt = styled_prompt
-        if negative_prompt.strip():
-            full_prompt = f"{styled_prompt}. Avoid: {negative_prompt.strip()}"
+            if wildcard_available and wildcard_manager:
+                if wildcard_manager.has_wildcards(original_prompt):
+                    wildcards_used = True
+                    progress((batch_idx * 0.9 / batch_count) + 0.01, desc=f"{batch_label}Processing wildcards...")
+                    yield last_image, f"{batch_label}Processing wildcards...", "", current_seed
+                    processed_prompt = wildcard_manager.process_prompt(original_prompt, seed=current_seed)
 
-        progress(0.05, desc="Initializing...")
-        yield None, "Starting generation...", "", seed
+            # Apply style to prompt
+            styled_prompt = apply_style(processed_prompt, style)
 
-        start_time = time.time()
+            # Enhance with Ollama if enabled (only on first batch item to save time)
+            if use_ollama and ollama_available and batch_idx == 0:
+                progress((batch_idx * 0.9 / batch_count) + 0.02, desc=f"{batch_label}Enhancing prompt with Ollama...")
+                yield last_image, f"{batch_label}Enhancing prompt with {ollama_model} ({ollama_length}/{ollama_complexity})...", "", current_seed
+                styled_prompt, enhance_status = enhance_with_ollama(
+                    styled_prompt, ollama_model, style,
+                    length=ollama_length, complexity=ollama_complexity
+                )
 
-        progress(0.1, desc=f"Generating with {inference_steps} steps...")
-        yield None, f"Generating image ({inference_steps} steps)...", "", seed
+            # Add negative prompt if provided
+            full_prompt = styled_prompt
+            if negative_prompt.strip():
+                full_prompt = f"{styled_prompt}. Avoid: {negative_prompt.strip()}"
 
-        # Generate the image
-        image = model.generate_image(
-            prompt=full_prompt,
-            seed=seed,
-            image_size=image_size,
-            diff_infer_steps=inference_steps,
-            stream=True,
-        )
+            progress((batch_idx * 0.9 / batch_count) + 0.05, desc=f"{batch_label}Initializing...")
+            yield last_image, f"{batch_label}Starting generation...", "", current_seed
 
-        generation_time = time.time() - start_time
+            start_time = time.time()
 
-        progress(0.95, desc="Finalizing...")
+            progress((batch_idx * 0.9 / batch_count) + 0.1, desc=f"{batch_label}Generating with {inference_steps} steps...")
+            yield last_image, f"{batch_label}Generating image ({inference_steps} steps)...", "", current_seed
 
-        # Generate filename and save if requested
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_prompt = "".join(c for c in prompt[:30] if c.isalnum() or c in " -_").strip()
-        safe_prompt = safe_prompt.replace(" ", "_")
-        filename = f"hunyuan_{timestamp}_{safe_prompt}_s{seed}.png"
-        filepath = OUTPUT_DIR / filename
+            # Generate the image
+            image = model.generate_image(
+                prompt=full_prompt,
+                seed=current_seed,
+                image_size=image_size,
+                diff_infer_steps=inference_steps,
+                stream=True,
+            )
 
-        if save_image:
-            image.save(filepath)
+            generation_time = time.time() - start_time
 
-            # Save config JSON sidecar for recreating this image
-            config = {
-                "prompt": original_prompt,
-                "processed_prompt": processed_prompt if wildcards_used else None,
-                "styled_prompt": styled_prompt,
-                "style": style,
-                "negative_prompt": negative_prompt,
-                "seed": seed,
-                "image_size": image_size,
-                "aspect_ratio": aspect_ratio,
-                "steps": inference_steps,
-                "quality_preset": quality_preset,
-                "use_ollama": use_ollama,
-                "ollama_model": ollama_model if use_ollama else None,
-                "wildcards_used": wildcards_used,
-                "generation_time": generation_time
-            }
-            config_path = save_image_config(str(filepath), config)
+            # Generate filename and save if requested
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_prompt = "".join(c for c in prompt[:30] if c.isalnum() or c in " -_").strip()
+            safe_prompt = safe_prompt.replace(" ", "_")
+            filename = f"hunyuan_{timestamp}_{safe_prompt}_s{current_seed}.png"
+            filepath = OUTPUT_DIR / filename
 
-            save_status = f"Saved: {filename}\nConfig: {Path(config_path).name}"
-            save_to_history(prompt, seed, image_size, inference_steps,
-                          str(filepath), generation_time, style)
+            if save_image:
+                image.save(filepath)
+
+                # Save config JSON sidecar for recreating this image
+                config = {
+                    "prompt": original_prompt,
+                    "processed_prompt": processed_prompt if wildcards_used else None,
+                    "styled_prompt": styled_prompt,
+                    "style": style,
+                    "negative_prompt": negative_prompt,
+                    "seed": current_seed,
+                    "image_size": image_size,
+                    "aspect_ratio": aspect_ratio,
+                    "steps": inference_steps,
+                    "quality_preset": quality_preset,
+                    "use_ollama": use_ollama,
+                    "ollama_model": ollama_model if use_ollama else None,
+                    "wildcards_used": wildcards_used,
+                    "generation_time": generation_time,
+                    "batch_index": batch_idx + 1 if batch_count > 1 else None,
+                    "batch_total": batch_count if batch_count > 1 else None
+                }
+                config_path = save_image_config(str(filepath), config)
+
+                save_status = f"Saved: {filename}"
+                save_to_history(prompt, current_seed, image_size, inference_steps,
+                              str(filepath), generation_time, style)
+            else:
+                save_status = "Not saved"
+
+            # Build info string for this image
+            if wildcards_used:
+                item_info = f"[{batch_idx + 1}] {processed_prompt[:60]}... | Seed: {current_seed} | {generation_time:.1f}s"
+            else:
+                item_info = f"[{batch_idx + 1}] Seed: {current_seed} | {generation_time:.1f}s"
+            all_info.append(item_info)
+
+            last_image = image
+            last_seed = current_seed
+
+            # Show intermediate result
+            progress_pct = ((batch_idx + 1) * 0.9 / batch_count)
+            yield image, f"{batch_label}Generated! {save_status}", "\n".join(all_info), current_seed
+
+        progress(1.0, desc="Done!")
+
+        # Build final info string
+        if batch_count > 1:
+            total_info = f"Batch complete: {batch_count} images generated\n\n" + "\n".join(all_info)
+            final_status = f"Batch complete! {batch_count} images generated"
         else:
-            save_status = "Not saved (enable 'Auto-save' to save)"
-
-        # Build info string
-        if wildcards_used:
-            info = f"""Original: {original_prompt}
+            # Single image - show detailed info
+            if wildcards_used:
+                total_info = f"""Original: {original_prompt}
 Processed: {processed_prompt}
 Style: {style}
 Size: {image_size}
 Steps: {inference_steps}
-Seed: {seed}
+Seed: {last_seed}
 Time: {generation_time:.1f}s
-{save_status}"""
-        else:
-            info = f"""Prompt: {prompt}
+{save_status if save_image else "Not saved (enable 'Auto-save' to save)"}"""
+            else:
+                total_info = f"""Prompt: {prompt}
 Style: {style}
 Size: {image_size}
 Steps: {inference_steps}
-Seed: {seed}
+Seed: {last_seed}
 Time: {generation_time:.1f}s
-{save_status}"""
+{save_status if save_image else "Not saved (enable 'Auto-save' to save)"}"""
+            final_status = "Generation complete!"
 
-        progress(1.0, desc="Done!")
-
-        yield image, "Generation complete!", info, seed
+        yield last_image, final_status, total_info, last_seed
 
     except Exception as e:
         import traceback
@@ -1022,6 +1086,74 @@ def get_gallery_images():
 def refresh_gallery():
     """Refresh the gallery with latest images."""
     return get_gallery_images()
+
+
+def load_config_from_main_gallery(evt: gr.SelectData):
+    """Load config from a selected image in the main gallery into the UI"""
+    if evt is None or evt.value is None:
+        return [gr.update()] * 9 + ["No image selected"]
+
+    # Get the image path from the event
+    if isinstance(evt.value, dict):
+        image_path = evt.value.get('image', {}).get('path', '')
+    elif isinstance(evt.value, str):
+        image_path = evt.value
+    else:
+        image_path = str(evt.value)
+
+    if not image_path:
+        return [gr.update()] * 9 + ["Could not get image path"]
+
+    # Find the corresponding JSON config
+    config_path = Path(image_path).with_suffix('.json')
+
+    # If config not found at direct path (e.g., Gradio temp path),
+    # try to find it in the main outputs directory
+    if not config_path.exists():
+        filename = Path(image_path).stem
+        config_path = OUTPUT_DIR / f"{filename}.json"
+
+    if not config_path.exists():
+        # Try to extract info from filename
+        filename = Path(image_path).stem
+        parts = filename.split('_')
+        seed = None
+        for p in parts:
+            if p.startswith('s') and p[1:].isdigit():
+                seed = int(p[1:])
+                break
+
+        return [
+            gr.update(),  # prompt
+            gr.update(),  # style
+            gr.update(),  # aspect_ratio
+            gr.update(),  # quality
+            gr.update(),  # steps
+            gr.update(value=seed) if seed else gr.update(),  # seed
+            gr.update(value=False) if seed else gr.update(),  # use_random
+            gr.update(),  # use_ollama
+            gr.update(),  # negative_prompt
+            f"No config file found. Seed extracted: {seed if seed else 'unknown'}"
+        ]
+
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+
+        return [
+            gr.update(value=config.get('prompt', '')),
+            gr.update(value=config.get('style', 'None')),
+            gr.update(value=config.get('aspect_ratio', '1:1 (Square)')),
+            gr.update(value=config.get('quality_preset', 'Standard')),
+            gr.update(value=config.get('steps', 20)),
+            gr.update(value=config.get('seed', 0)),
+            gr.update(value=False),  # Uncheck random to use saved seed
+            gr.update(value=config.get('use_ollama', False)),
+            gr.update(value=config.get('negative_prompt', '')),
+            f"Loaded: {Path(image_path).name}\nPrompt: {config.get('prompt', '')[:80]}...\nSeed: {config.get('seed')}"
+        ]
+    except Exception as e:
+        return [gr.update()] * 9 + [f"Error loading config: {e}"]
 
 
 def clear_outputs():
@@ -1249,6 +1381,26 @@ def create_ui():
                                 info="Smaller = faster, Larger = more creative"
                             )
 
+                        with gr.Group():
+                            gr.Markdown("**Prompt Length & Complexity**")
+                            with gr.Row():
+                                ollama_length = gr.Dropdown(
+                                    label="Length",
+                                    choices=["minimal", "short", "medium", "long", "detailed"],
+                                    value="medium",
+                                    info="How many words in the enhanced prompt"
+                                )
+                                ollama_complexity = gr.Dropdown(
+                                    label="Complexity",
+                                    choices=["simple", "basic", "moderate", "detailed", "complex"],
+                                    value="detailed",
+                                    info="How much detail to add"
+                                )
+                            gr.Markdown("""
+                            *Length:* minimal (15-30 words) → detailed (150-250 words)
+                            *Complexity:* simple (subject only) → complex (full cinematic detail)
+                            """)
+
                         with gr.Accordion("Install/Remove Models", open=False):
                             new_model_name = gr.Textbox(
                                 label="Model to Install",
@@ -1285,6 +1437,15 @@ def create_ui():
 
                 # Generate buttons
                 gr.Markdown("### Generate")
+                with gr.Row():
+                    batch_count = gr.Slider(
+                        label="Batch Count (images to generate)",
+                        minimum=1,
+                        maximum=20,
+                        value=1,
+                        step=1,
+                        info="Generate multiple images - wildcards get new random values each time"
+                    )
                 with gr.Row():
                     generate_btn = gr.Button(
                         "Generate Image",
@@ -1464,6 +1625,20 @@ def create_ui():
                                     label="Enhance prompts",
                                     value=True,
                                     info="Use Ollama to enhance each prompt"
+                                )
+
+                            with gr.Row():
+                                batch_ollama_length = gr.Dropdown(
+                                    label="Prompt Length",
+                                    choices=["minimal", "short", "medium", "long", "detailed"],
+                                    value="medium",
+                                    info="How long the generated prompts should be"
+                                )
+                                batch_ollama_complexity = gr.Dropdown(
+                                    label="Prompt Complexity",
+                                    choices=["simple", "basic", "moderate", "detailed", "complex"],
+                                    value="detailed",
+                                    info="How much detail to include"
                                 )
 
                             batch_random_seeds = gr.Checkbox(
@@ -1681,6 +1856,9 @@ def create_ui():
                 save_image,
                 use_ollama,
                 ollama_model,
+                batch_count,
+                ollama_length,
+                ollama_complexity,
             ],
             outputs=[output_image, status_text, info_text, last_seed],
         )
@@ -1717,6 +1895,24 @@ def create_ui():
         refresh_btn.click(
             fn=refresh_gallery,
             outputs=gallery,
+        )
+
+        # Main gallery click-to-load handler
+        gallery.select(
+            fn=load_config_from_main_gallery,
+            inputs=[],
+            outputs=[
+                prompt,
+                style,
+                aspect_ratio,
+                quality_preset,
+                custom_steps,
+                seed,
+                use_random_seed,
+                use_ollama,
+                negative_prompt,
+                info_text
+            ]
         )
 
         # Load config handler
@@ -1782,6 +1978,9 @@ def create_ui():
                 save_image,
                 use_ollama,
                 ollama_model,
+                batch_count,
+                ollama_length,
+                ollama_complexity,
             ],
             outputs=[output_image, status_text, info_text, last_seed],
         )
@@ -1805,7 +2004,9 @@ def create_ui():
                 batch_aspect,
                 batch_quality,
                 batch_random_seeds,
-                batch_name
+                batch_name,
+                batch_ollama_length,
+                batch_ollama_complexity,
             ],
             outputs=[gr.State(), batch_status, batch_output_dir, batch_gallery]
         )

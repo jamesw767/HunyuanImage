@@ -19,7 +19,82 @@ logger = logging.getLogger(__name__)
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_MODEL = "qwen2.5:7b-instruct"
 
-# System prompts following HunyuanImage's cinematographic formula
+# Length presets (word counts)
+LENGTH_PRESETS = {
+    "minimal": {"words": "15-30", "desc": "Very short, key elements only"},
+    "short": {"words": "30-50", "desc": "Brief but complete"},
+    "medium": {"words": "50-100", "desc": "Balanced detail"},
+    "long": {"words": "100-150", "desc": "Rich detail"},
+    "detailed": {"words": "150-250", "desc": "Maximum detail"},
+}
+
+# Complexity presets
+COMPLEXITY_PRESETS = {
+    "simple": {
+        "desc": "Basic subject description only",
+        "elements": "Focus only on the main subject. No complex lighting, composition, or technical terms.",
+    },
+    "basic": {
+        "desc": "Subject with basic setting",
+        "elements": "Include subject and simple environment. Basic lighting (daylight, night). Minimal technical terms.",
+    },
+    "moderate": {
+        "desc": "Subject, setting, and mood",
+        "elements": "Include subject, environment, basic composition (close-up, wide shot), and mood/atmosphere.",
+    },
+    "detailed": {
+        "desc": "Full cinematographic approach",
+        "elements": "Include all 5 cinematographic elements: subject details, quality descriptors, camera angle/composition, lighting/atmosphere, and art style.",
+    },
+    "complex": {
+        "desc": "Maximum artistic detail",
+        "elements": "Include extensive details: materials, textures, specific lighting setups, advanced composition techniques, color palettes, artistic references, and rendering style.",
+    },
+}
+
+
+def get_enhance_system_prompt(length: str = "medium", complexity: str = "detailed") -> str:
+    """Generate a dynamic system prompt based on length and complexity settings."""
+    length_info = LENGTH_PRESETS.get(length, LENGTH_PRESETS["medium"])
+    complexity_info = COMPLEXITY_PRESETS.get(complexity, COMPLEXITY_PRESETS["detailed"])
+
+    return f"""You are an expert image prompt engineer for HunyuanImage-3.0, an advanced AI image generator.
+
+Your task is to enhance the user's simple prompt into a description for image generation.
+
+LENGTH REQUIREMENT: {length_info['words']} words ({length_info['desc']})
+COMPLEXITY LEVEL: {complexity} - {complexity_info['desc']}
+
+WHAT TO INCLUDE:
+{complexity_info['elements']}
+
+RULES:
+- Keep the core intent and subject of the original prompt
+- Output ONLY the enhanced prompt text, no explanations or labels
+- Stay within the {length_info['words']} word limit
+- Be creative but stay true to what was requested
+- Don't add inappropriate or unsafe content"""
+
+
+def get_generation_system_prompt(length: str = "medium", complexity: str = "detailed") -> str:
+    """Generate a dynamic system prompt for prompt generation based on length and complexity."""
+    length_info = LENGTH_PRESETS.get(length, LENGTH_PRESETS["medium"])
+    complexity_info = COMPLEXITY_PRESETS.get(complexity, COMPLEXITY_PRESETS["detailed"])
+
+    return f"""You are a creative prompt generator for HunyuanImage-3.0 image generation.
+
+Given a theme or concept, generate unique image prompts.
+
+LENGTH REQUIREMENT: Each prompt should be {length_info['words']} words ({length_info['desc']})
+COMPLEXITY LEVEL: {complexity} - {complexity_info['desc']}
+
+WHAT TO INCLUDE IN EACH PROMPT:
+{complexity_info['elements']}
+
+Output ONLY the prompts, one per line, no numbering or explanations."""
+
+
+# Legacy system prompts (for backward compatibility)
 ENHANCE_SYSTEM_PROMPT = """You are an expert image prompt engineer for HunyuanImage-3.0, an advanced AI image generator.
 
 Your task is to enhance the user's simple prompt into a detailed, cinematic description that will generate stunning images. Follow this 5-part cinematographic formula:
@@ -212,7 +287,9 @@ class PromptEnhancer:
         prompt: str,
         style: Optional[str] = None,
         temperature: float = 0.7,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        length: str = "medium",
+        complexity: str = "detailed"
     ) -> str:
         """
         Enhance a simple prompt into a detailed, cinematic description.
@@ -222,6 +299,8 @@ class PromptEnhancer:
             style: Optional style to incorporate (e.g., "cinematic", "anime", "oil painting")
             temperature: Creativity level (0.0-1.0)
             model: Ollama model to use (default: qwen2.5:7b-instruct)
+            length: Prompt length preset (minimal, short, medium, long, detailed)
+            complexity: Prompt complexity preset (simple, basic, moderate, detailed, complex)
 
         Returns:
             Enhanced prompt string
@@ -230,15 +309,28 @@ class PromptEnhancer:
         if style:
             user_prompt = f"[Style: {style}] {prompt}"
 
+        # Use dynamic system prompt based on length/complexity settings
+        system_prompt = get_enhance_system_prompt(length, complexity)
+
+        # Adjust max tokens based on length setting
+        max_tokens_map = {
+            "minimal": 100,
+            "short": 150,
+            "medium": 256,
+            "long": 384,
+            "detailed": 512,
+        }
+        max_tokens = max_tokens_map.get(length, 256)
+
         response = self.client.generate(
             prompt=user_prompt,
-            system=ENHANCE_SYSTEM_PROMPT,
+            system=system_prompt,
             temperature=temperature,
             model=model,
-            max_tokens=512
+            max_tokens=max_tokens
         )
 
-        logger.info(f"Enhanced prompt in {response.total_duration:.1f}s ({response.tokens_per_second:.1f} tok/s)")
+        logger.info(f"Enhanced prompt ({length}/{complexity}) in {response.total_duration:.1f}s ({response.tokens_per_second:.1f} tok/s)")
         return response.text
 
     def generate_prompts(
@@ -247,7 +339,9 @@ class PromptEnhancer:
         count: int = 10,
         style: Optional[str] = None,
         temperature: float = 0.8,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        length: str = "medium",
+        complexity: str = "detailed"
     ) -> List[str]:
         """
         Generate multiple creative prompts for a theme.
@@ -258,25 +352,40 @@ class PromptEnhancer:
             style: Optional style preference
             temperature: Creativity level
             model: Ollama model to use
+            length: Prompt length preset (minimal, short, medium, long, detailed)
+            complexity: Prompt complexity preset (simple, basic, moderate, detailed, complex)
 
         Returns:
             List of generated prompts
         """
-        user_prompt = f"Generate {count} unique, detailed image prompts for the theme: '{theme}'"
+        user_prompt = f"Generate {count} unique image prompts for the theme: '{theme}'"
         if style:
             user_prompt += f"\nPreferred style: {style}"
 
+        # Use dynamic system prompt based on length/complexity settings
+        system_prompt = get_generation_system_prompt(length, complexity)
+
+        # Adjust max tokens based on length setting
+        tokens_per_prompt = {
+            "minimal": 50,
+            "short": 80,
+            "medium": 150,
+            "long": 200,
+            "detailed": 300,
+        }
+        max_tokens = count * tokens_per_prompt.get(length, 150)
+
         response = self.client.generate(
             prompt=user_prompt,
-            system=GENERATE_PROMPTS_SYSTEM,
+            system=system_prompt,
             temperature=temperature,
             model=model,
-            max_tokens=count * 200  # ~200 tokens per prompt
+            max_tokens=max_tokens
         )
 
         # Parse prompts from response
         prompts = [p.strip() for p in response.text.split('\n') if p.strip()]
-        logger.info(f"Generated {len(prompts)} prompts in {response.total_duration:.1f}s")
+        logger.info(f"Generated {len(prompts)} prompts ({length}/{complexity}) in {response.total_duration:.1f}s")
         return prompts
 
     def create_variations(
