@@ -34,6 +34,18 @@ try:
 except ImportError:
     pass
 
+# Wildcard integration
+wildcard_available = False
+wildcard_manager = None
+try:
+    from wildcard_utils import WildcardManager, insert_wildcard, preview_wildcard
+    wildcard_manager = WildcardManager(
+        json_path=Path(__file__).parent / "wildcards.json"
+    )
+    wildcard_available = True
+except ImportError:
+    pass
+
 # Ollama globals
 ollama_enhancer = None
 ollama_generator = None
@@ -448,11 +460,16 @@ def run_batch_generation(
             prompt = job["prompt"]
             style = job["style"]
 
+            # Generate seed first (needed for wildcard processing)
+            seed = random.randint(0, 2**32 - 1) if random_seeds else (idx * 12345) % (2**32)
+
+            # Process wildcards if present
+            original_prompt = prompt
+            if wildcard_available and wildcard_manager and wildcard_manager.has_wildcards(prompt):
+                prompt = wildcard_manager.process_prompt(prompt, seed=seed)
+
             # Apply style
             styled_prompt = apply_style(prompt, style)
-
-            # Generate seed
-            seed = random.randint(0, 2**32 - 1) if random_seeds else (idx * 12345) % (2**32)
 
             progress((idx + 1) / total_jobs, desc=f"Generating {idx + 1}/{total_jobs}...")
             yield generated_images, f"Generating {idx + 1}/{total_jobs}: {prompt[:50]}...", f"Output: {batch_dir}", generated_images[-12:] if generated_images else []
@@ -477,8 +494,10 @@ def run_batch_generation(
                 image.save(filepath)
 
                 # Save config JSON for this image
+                wildcards_used = (original_prompt != prompt)
                 config = {
-                    "prompt": prompt,
+                    "prompt": original_prompt,
+                    "processed_prompt": prompt if wildcards_used else None,
                     "styled_prompt": styled_prompt,
                     "style": style,
                     "seed": seed,
@@ -488,6 +507,7 @@ def run_batch_generation(
                     "quality_preset": quality_preset,
                     "batch_name": batch_name,
                     "batch_index": idx + 1,
+                    "wildcards_used": wildcards_used,
                     "generation_time": gen_time
                 }
                 save_image_config(str(filepath), config)
@@ -864,8 +884,20 @@ def generate_image(
         else:
             inference_steps = QUALITY_PRESETS.get(quality_preset, {}).get("steps", 20)
 
+        # Process wildcards if available
+        original_prompt = prompt.strip()
+        processed_prompt = original_prompt
+        wildcards_used = False
+
+        if wildcard_available and wildcard_manager:
+            if wildcard_manager.has_wildcards(original_prompt):
+                wildcards_used = True
+                progress(0.01, desc="Processing wildcards...")
+                yield None, "Processing wildcards...", "", seed
+                processed_prompt = wildcard_manager.process_prompt(original_prompt, seed=seed)
+
         # Apply style to prompt
-        styled_prompt = apply_style(prompt.strip(), style)
+        styled_prompt = apply_style(processed_prompt, style)
 
         # Enhance with Ollama if enabled
         if use_ollama and ollama_available:
@@ -911,7 +943,8 @@ def generate_image(
 
             # Save config JSON sidecar for recreating this image
             config = {
-                "prompt": prompt,
+                "prompt": original_prompt,
+                "processed_prompt": processed_prompt if wildcards_used else None,
                 "styled_prompt": styled_prompt,
                 "style": style,
                 "negative_prompt": negative_prompt,
@@ -922,6 +955,7 @@ def generate_image(
                 "quality_preset": quality_preset,
                 "use_ollama": use_ollama,
                 "ollama_model": ollama_model if use_ollama else None,
+                "wildcards_used": wildcards_used,
                 "generation_time": generation_time
             }
             config_path = save_image_config(str(filepath), config)
@@ -933,7 +967,17 @@ def generate_image(
             save_status = "Not saved (enable 'Auto-save' to save)"
 
         # Build info string
-        info = f"""Prompt: {prompt}
+        if wildcards_used:
+            info = f"""Original: {original_prompt}
+Processed: {processed_prompt}
+Style: {style}
+Size: {image_size}
+Steps: {inference_steps}
+Seed: {seed}
+Time: {generation_time:.1f}s
+{save_status}"""
+        else:
+            info = f"""Prompt: {prompt}
 Style: {style}
 Size: {image_size}
 Steps: {inference_steps}
@@ -1064,6 +1108,48 @@ def create_ui():
                     placeholder="blurry, low quality, distorted...",
                     lines=1,
                 )
+
+                # Wildcards section
+                with gr.Accordion("Wildcards (Dynamic Prompt Variables)", open=False):
+                    if wildcard_available and wildcard_manager:
+                        gr.Markdown("""
+                        **Insert `[wildcard]` tags to generate random variations!**
+                        Example: `A [animal] in a [landscape]` → `A tiger in a forest`
+                        """)
+                        with gr.Row():
+                            wildcard_category = gr.Dropdown(
+                                label="Category",
+                                choices=["all"] + sorted(set(
+                                    k.split('-')[0] for k in wildcard_manager.get_available_wildcards()
+                                )),
+                                value="all",
+                                scale=1
+                            )
+                            wildcard_dropdown = gr.Dropdown(
+                                label="Select Wildcard to Insert",
+                                choices=wildcard_manager.get_available_wildcards(),
+                                interactive=True,
+                                scale=3
+                            )
+                            wildcard_insert_btn = gr.Button("Insert", size="sm", scale=1)
+
+                        wildcard_preview = gr.Textbox(
+                            label="Preview (sample values)",
+                            interactive=False,
+                            lines=2
+                        )
+
+                        with gr.Row():
+                            wildcard_search = gr.Textbox(
+                                label="Search wildcards",
+                                placeholder="Type to filter...",
+                                scale=3
+                            )
+                            wildcard_count = gr.Markdown(
+                                f"**{len(wildcard_manager.get_available_wildcards())}** wildcards available"
+                            )
+                    else:
+                        gr.Markdown("*Wildcards not available. Check wildcards.json file.*")
 
                 # Example prompts
                 with gr.Accordion("Example Prompts", open=False):
@@ -1841,6 +1927,71 @@ def create_ui():
                 browse_load_status
             ]
         )
+
+        # ============================================================
+        # WILDCARD HANDLERS
+        # ============================================================
+
+        if wildcard_available and wildcard_manager:
+            def filter_wildcards_by_category(category):
+                """Filter wildcards by category prefix"""
+                all_wildcards = wildcard_manager.get_available_wildcards()
+                if category == "all":
+                    return gr.update(choices=all_wildcards)
+                filtered = [w for w in all_wildcards if w.startswith(category + "-") or w == category]
+                if not filtered:
+                    filtered = [w for w in all_wildcards if category in w]
+                return gr.update(choices=filtered if filtered else all_wildcards)
+
+            def search_wildcards(query):
+                """Search wildcards by name"""
+                if not query.strip():
+                    return gr.update(choices=wildcard_manager.get_available_wildcards())
+                results = wildcard_manager.search_wildcards(query)
+                return gr.update(choices=results if results else wildcard_manager.get_available_wildcards())
+
+            def show_wildcard_preview(wildcard_name):
+                """Show preview of wildcard values"""
+                if not wildcard_name:
+                    return ""
+                return preview_wildcard(wildcard_name)
+
+            def insert_wildcard_to_prompt(current_prompt, wildcard_name):
+                """Insert wildcard tag into prompt"""
+                if not wildcard_name:
+                    return current_prompt
+                return insert_wildcard(current_prompt, wildcard_name)
+
+            wildcard_category.change(
+                fn=filter_wildcards_by_category,
+                inputs=[wildcard_category],
+                outputs=[wildcard_dropdown]
+            )
+
+            wildcard_search.change(
+                fn=search_wildcards,
+                inputs=[wildcard_search],
+                outputs=[wildcard_dropdown]
+            )
+
+            wildcard_dropdown.change(
+                fn=show_wildcard_preview,
+                inputs=[wildcard_dropdown],
+                outputs=[wildcard_preview]
+            )
+
+            wildcard_insert_btn.click(
+                fn=insert_wildcard_to_prompt,
+                inputs=[prompt, wildcard_dropdown],
+                outputs=[prompt]
+            )
+
+            # Also insert on dropdown select (double-click behavior)
+            wildcard_dropdown.select(
+                fn=insert_wildcard_to_prompt,
+                inputs=[prompt, wildcard_dropdown],
+                outputs=[prompt]
+            )
 
     return app
 

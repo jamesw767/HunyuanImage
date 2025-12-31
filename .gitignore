@@ -46,3 +46,6 @@ test_*.png
 
 # Dev notes (optional)
 DEVELOPMENT_PROJECTS.md
+
+# External repos (cloned separately)
+sd-wildcards/
