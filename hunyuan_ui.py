@@ -664,6 +664,13 @@ def run_batch_generation(
             try:
                 start_time = time.time()
 
+                # Print prompt to terminal
+                print(f"\n{'='*60}")
+                print(f"[BATCH {idx+1}/{total_jobs}] Generating image...")
+                print(f"Seed: {seed} | Size: {image_size} | Steps: {steps}")
+                print(f"Prompt: {full_prompt[:200]}{'...' if len(full_prompt) > 200 else ''}")
+                print(f"{'='*60}\n")
+
                 image = model.generate_image(
                     prompt=full_prompt,
                     seed=seed,
@@ -1200,6 +1207,18 @@ def generate_image(
             yield last_image, f"{batch_label}Starting generation...", "", current_seed
 
             start_time = time.time()
+
+            # Print prompt to terminal
+            print(f"\n{'='*60}")
+            if batch_count > 1:
+                print(f"[IMAGE {batch_idx+1}/{batch_count}] Generating...")
+            else:
+                print(f"[GENERATING IMAGE]")
+            print(f"Seed: {current_seed} | Size: {image_size} | Steps: {inference_steps}")
+            print(f"Prompt: {full_prompt[:300]}{'...' if len(full_prompt) > 300 else ''}")
+            if negative_prompt.strip():
+                print(f"Negative: {negative_prompt[:100]}{'...' if len(negative_prompt) > 100 else ''}")
+            print(f"{'='*60}\n")
 
             progress((batch_idx * 0.9 / batch_count) + 0.1, desc=f"{batch_label}Generating with {inference_steps} steps...")
             yield last_image, f"{batch_label}Generating image ({inference_steps} steps)...", "", current_seed
