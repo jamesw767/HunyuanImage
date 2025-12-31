@@ -850,12 +850,28 @@ def load_batch_config(config_name: str):
 # BATCH GALLERY BROWSER
 # ============================================================================
 
-def get_batch_directories() -> List[str]:
+# Store custom batch directory path globally
+custom_batch_base_dir = None
+
+
+def get_batch_directories(custom_dir: str = None) -> List[str]:
     """Get list of batch output directories"""
-    batch_dir = OUTPUT_DIR / "batches"
+    global custom_batch_base_dir
+
+    if custom_dir:
+        custom_batch_base_dir = custom_dir
+
+    batch_dir = Path(custom_batch_base_dir) if custom_batch_base_dir else OUTPUT_DIR / "batches"
+
     if not batch_dir.exists():
         return ["(No batches yet)"]
 
+    # Check if this directory itself is a batch (contains .png files)
+    if list(batch_dir.glob("*.png")):
+        # This directory IS a batch, return its name
+        return [batch_dir.name]
+
+    # Otherwise, look for subdirectories that are batches
     dirs = sorted(
         [d.name for d in batch_dir.iterdir() if d.is_dir()],
         reverse=True
@@ -863,12 +879,64 @@ def get_batch_directories() -> List[str]:
     return dirs if dirs else ["(No batches yet)"]
 
 
+def load_custom_batch_directory(custom_path: str):
+    """Load batches from a custom directory path"""
+    global custom_batch_base_dir
+
+    if not custom_path or not custom_path.strip():
+        # Reset to default
+        custom_batch_base_dir = None
+        dirs = get_batch_directories()
+        return (
+            gr.update(choices=dirs, value=dirs[0] if dirs else None),
+            f"Reset to default: {OUTPUT_DIR / 'batches'}"
+        )
+
+    path = Path(custom_path.strip())
+
+    if not path.exists():
+        return gr.update(), f"Error: Directory does not exist: {custom_path}"
+
+    if not path.is_dir():
+        return gr.update(), f"Error: Path is not a directory: {custom_path}"
+
+    # Check if this is a batch directory (has PNG images)
+    has_images = list(path.glob("*.png"))
+
+    if has_images:
+        # This directory itself is a batch
+        custom_batch_base_dir = str(path.parent)
+        dirs = [path.name]
+        return (
+            gr.update(choices=dirs, value=path.name),
+            f"Loaded batch directory: {path.name} ({len(has_images)} images)"
+        )
+
+    # Check for subdirectories with images
+    subdirs = [d for d in path.iterdir() if d.is_dir() and list(d.glob("*.png"))]
+
+    if subdirs:
+        custom_batch_base_dir = str(path)
+        dirs = sorted([d.name for d in subdirs], reverse=True)
+        return (
+            gr.update(choices=dirs, value=dirs[0] if dirs else None),
+            f"Found {len(dirs)} batch folders in: {path}"
+        )
+
+    return gr.update(), f"No batch folders found in: {path}"
+
+
 def get_batch_images(batch_name: str, page: int = 0, per_page: int = 24) -> tuple:
     """Get images from a specific batch directory with pagination"""
+    global custom_batch_base_dir
+
     if not batch_name or batch_name == "(No batches yet)":
         return [], "No batch selected", 0, 0
 
-    batch_path = OUTPUT_DIR / "batches" / batch_name
+    # Use custom base dir if set, otherwise use default
+    base_dir = Path(custom_batch_base_dir) if custom_batch_base_dir else OUTPUT_DIR / "batches"
+    batch_path = base_dir / batch_name
+
     if not batch_path.exists():
         return [], f"Batch not found: {batch_name}", 0, 0
 
@@ -882,13 +950,16 @@ def get_batch_images(batch_name: str, page: int = 0, per_page: int = 24) -> tupl
 
     page_images = [str(img) for img in all_images[start_idx:end_idx]]
 
-    info = f"Batch: {batch_name}\nImages: {start_idx + 1}-{end_idx} of {total_images} | Page {page + 1}/{total_pages}"
+    location = f"({base_dir})" if custom_batch_base_dir else "(default)"
+    info = f"Batch: {batch_name} {location}\nImages: {start_idx + 1}-{end_idx} of {total_images} | Page {page + 1}/{total_pages}"
 
     return page_images, info, page, total_pages
 
 
 def load_image_from_gallery(evt: gr.SelectData, current_batch: str):
     """Load config from a selected gallery image into the main UI"""
+    global custom_batch_base_dir
+
     if evt is None or evt.value is None:
         return [gr.update()] * 9 + ["No image selected"]
 
@@ -910,7 +981,9 @@ def load_image_from_gallery(evt: gr.SelectData, current_batch: str):
     # try to find it in the actual batch directory
     if not config_path.exists() and current_batch and current_batch != "(No batches yet)":
         filename = Path(image_path).stem
-        batch_dir = OUTPUT_DIR / "batches" / current_batch
+        # Use custom base dir if set, otherwise use default
+        base_dir = Path(custom_batch_base_dir) if custom_batch_base_dir else OUTPUT_DIR / "batches"
+        batch_dir = base_dir / current_batch
         config_path = batch_dir / f"{filename}.json"
 
     if not config_path.exists():
@@ -1900,6 +1973,22 @@ def create_ui():
                         )
                         browse_refresh_btn = gr.Button("↻ Refresh", size="sm", scale=1)
 
+                    with gr.Accordion("Browse External Directory", open=False):
+                        gr.Markdown("*Load batches from a different location:*")
+                        with gr.Row():
+                            custom_batch_dir = gr.Textbox(
+                                label="Custom Directory Path",
+                                placeholder="/path/to/your/batch/folder or folder containing batch folders",
+                                scale=4
+                            )
+                            browse_custom_btn = gr.Button("Load Directory", variant="primary", size="sm", scale=1)
+                        custom_browse_status = gr.Textbox(
+                            label="Status",
+                            interactive=False,
+                            lines=1,
+                            visible=True
+                        )
+
                     browse_info = gr.Textbox(
                         label="Batch Info",
                         interactive=False,
@@ -2287,6 +2376,13 @@ def create_ui():
         browse_refresh_btn.click(
             fn=refresh_batch_list,
             outputs=[browse_batch_dropdown]
+        )
+
+        # Custom directory browser
+        browse_custom_btn.click(
+            fn=load_custom_batch_directory,
+            inputs=[custom_batch_dir],
+            outputs=[browse_batch_dropdown, custom_browse_status]
         )
 
         browse_prev_btn.click(
