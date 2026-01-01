@@ -538,11 +538,14 @@ def generate_batch_prompts(themes_text: str, variations_per_theme: int,
             if not variations:
                 variations = [theme]
         else:
-            # No Ollama variations - just expand wildcards for each "variation" (which is just 1)
-            expanded_theme = theme
-            if wildcard_available and wildcard_manager and wildcard_manager.has_wildcards(theme):
-                expanded_theme = wildcard_manager.process_prompt(theme)
-            variations = [expanded_theme]
+            # No Ollama - still loop to get unique wildcard values for each variation
+            # "[color] bird" becomes "red bird", then "blue bird", then "green bird"
+            variations = []
+            for _ in range(variations_per_theme):
+                expanded_theme = theme
+                if wildcard_available and wildcard_manager and wildcard_manager.has_wildcards(theme):
+                    expanded_theme = wildcard_manager.process_prompt(theme)
+                variations.append(expanded_theme)
 
         # Enhance each variation if requested
         if enhance_prompts and ollama_available and ollama_enhancer:
