@@ -645,10 +645,10 @@ def run_batch_generation(
             # Generate seed first (needed for wildcard processing)
             seed = random.randint(0, 2**32 - 1) if random_seeds else (idx * 12345) % (2**32)
 
-            # Process wildcards if present
+            # Process wildcards if present - fresh random for each image
             original_prompt = prompt
             if wildcard_available and wildcard_manager and wildcard_manager.has_wildcards(prompt):
-                prompt = wildcard_manager.process_prompt(prompt, seed=seed)
+                prompt = wildcard_manager.process_prompt(prompt)
 
             # Apply style
             styled_prompt = apply_style(prompt, style)
@@ -1204,7 +1204,8 @@ def generate_image(
                     wildcards_used = True
                     progress((batch_idx * 0.9 / batch_count) + 0.01, desc=f"{batch_label}Processing wildcards...")
                     yield last_image, f"{batch_label}Processing wildcards...", "", current_seed
-                    processed_prompt = wildcard_manager.process_prompt(original_prompt, seed=current_seed)
+                    # Don't pass seed - let wildcards be truly random for each batch item
+                    processed_prompt = wildcard_manager.process_prompt(original_prompt)
 
             # Apply style to prompt
             styled_prompt = apply_style(processed_prompt, style)
