@@ -510,15 +510,39 @@ def generate_batch_prompts(themes_text: str, variations_per_theme: int,
     for theme in themes:
         # Generate variations using Ollama
         if variations_per_theme > 1 and ollama_available and ollama_generator:
-            try:
-                variations = ollama_generator.generate_themed_prompts(
-                    theme, count=variations_per_theme, temperature=0.85,
-                    length=ollama_length, complexity=ollama_complexity
-                )
-            except Exception as e:
-                variations = [theme]  # Fall back to original
+            variations = []
+            for var_idx in range(variations_per_theme):
+                try:
+                    # Expand wildcards FRESH for each variation BEFORE sending to Ollama
+                    # This ensures each variation gets different random wildcard values
+                    expanded_theme = theme
+                    if wildcard_available and wildcard_manager and wildcard_manager.has_wildcards(theme):
+                        expanded_theme = wildcard_manager.process_prompt(theme)
+
+                    # Now generate ONE variation from the expanded theme
+                    var_prompts = ollama_generator.generate_themed_prompts(
+                        expanded_theme, count=1, temperature=0.85,
+                        length=ollama_length, complexity=ollama_complexity
+                    )
+                    if var_prompts:
+                        variations.append(var_prompts[0])
+                    else:
+                        variations.append(expanded_theme)
+                except Exception as e:
+                    # Fall back to just the expanded theme
+                    expanded_theme = theme
+                    if wildcard_available and wildcard_manager and wildcard_manager.has_wildcards(theme):
+                        expanded_theme = wildcard_manager.process_prompt(theme)
+                    variations.append(expanded_theme)
+
+            if not variations:
+                variations = [theme]
         else:
-            variations = [theme]
+            # No Ollama variations - just expand wildcards for each "variation" (which is just 1)
+            expanded_theme = theme
+            if wildcard_available and wildcard_manager and wildcard_manager.has_wildcards(theme):
+                expanded_theme = wildcard_manager.process_prompt(theme)
+            variations = [expanded_theme]
 
         # Enhance each variation if requested
         if enhance_prompts and ollama_available and ollama_enhancer:
