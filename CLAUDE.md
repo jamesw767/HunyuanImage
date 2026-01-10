@@ -105,3 +105,27 @@ Prompts can contain `[wildcard]` tags that get randomly resolved:
 ```
 
 Categories are prefixed (e.g., `artist-famous`, `color-warm`). Supports nested resolution.
+
+Combined wildcards with `+` syntax:
+```
+"A [color+animal]" → "A golden dragon"
+```
+
+## HunyuanImage 3.0 Prompting Guide
+
+See **HUNYUAN_GUIDE.md** for comprehensive documentation on:
+- Why this model is 80B parameters and what advantages that provides
+- How prompting differs from Stable Diffusion and FLUX
+- Recommended prompt structure and techniques
+- Guidance Scale (CFG) settings
+- Text rendering tips
+- Best practices for getting optimal results
+
+### Quick Prompting Tips
+
+1. **Write prose, not keywords** - Full sentences work better than comma-separated lists
+2. **Use quotes for text rendering** - `with the text "HELLO" in bold serif font`
+3. **No bracket emphasis** - Unlike SD, `(word:1.4)` syntax does NOT work
+4. **Embed negatives in prompt** - "no watermark, no text" works better than negative prompt field
+5. **Be specific** - "85mm lens at f/2.8, golden hour lighting" beats "professional photo"
+6. **Define relationships** - Explicitly state how subjects interact spatially

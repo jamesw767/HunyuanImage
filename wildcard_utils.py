@@ -5,9 +5,17 @@ Wildcard Manager for HunyuanImage-3.0
 Handles loading of wildcard definitions from JSON and random substitution
 in prompts. Wildcards are specified using [key] syntax.
 
+Features:
+- Single wildcards: [animal] -> "tiger"
+- Combined wildcards: [color+animal] -> "golden dragon"
+- Multi-combine: [adjective+material+object] -> "ancient wooden chest"
+
 Example:
     Prompt: "A [animal] in a [landscape] setting"
     Result: "A tiger in a forest setting"
+
+    Prompt: "A [color+animal] in a [mood+landscape]"
+    Result: "A silver wolf in a mysterious forest"
 """
 
 import json
@@ -71,9 +79,57 @@ class WildcardManager:
             return random.choice(items)
         return None
 
+    def get_combined_value(self, combined_key: str, separator: str = " ") -> Optional[str]:
+        """
+        Get combined random values from multiple wildcard categories.
+
+        Args:
+            combined_key: Keys joined with '+', e.g., "color+animal"
+            separator: String to join the values with (default: space)
+
+        Returns:
+            Combined string like "golden dragon" or None if any key is invalid
+
+        Example:
+            get_combined_value("color+animal") -> "silver wolf"
+            get_combined_value("adjective+material+object") -> "ancient wooden chest"
+        """
+        keys = [k.strip() for k in combined_key.split('+')]
+
+        # Check all keys exist
+        values = []
+        for key in keys:
+            if key not in self.data:
+                return None
+            value = random.choice(self.data[key])
+            values.append(value)
+
+        return separator.join(values)
+
+    def is_combined_wildcard(self, key: str) -> bool:
+        """Check if a key uses the combination syntax (contains +)"""
+        return '+' in key
+
+    def validate_combined_wildcard(self, combined_key: str) -> tuple:
+        """
+        Validate a combined wildcard and return info about it.
+
+        Returns:
+            (is_valid, missing_keys, found_keys)
+        """
+        keys = [k.strip() for k in combined_key.split('+')]
+        missing = [k for k in keys if k not in self.data]
+        found = [k for k in keys if k in self.data]
+        return (len(missing) == 0, missing, found)
+
     def process_prompt(self, prompt: str, seed: Optional[int] = None) -> str:
         """
         Process a prompt and replace all [key] wildcards with random values.
+
+        Supports both single wildcards and combined wildcards:
+        - [animal] -> picks one random animal
+        - [color+animal] -> picks random color AND animal, joins with space
+        - [adj+material+object] -> picks from all three, joins with spaces
 
         Args:
             prompt: The prompt text with [wildcard] placeholders
@@ -95,7 +151,15 @@ class WildcardManager:
         def replace_match(match):
             key = match.group(1).strip()
 
-            # Check if key exists in our data
+            # Check for combined wildcard syntax (e.g., "color+animal")
+            if '+' in key:
+                combined_result = self.get_combined_value(key)
+                if combined_result is not None:
+                    return combined_result
+                # If combined fails, keep original
+                return match.group(0)
+
+            # Check if single key exists in our data
             if key in self.data:
                 choice = random.choice(self.data[key])
                 return choice
@@ -140,22 +204,31 @@ class WildcardManager:
             results.append(processed)
         return results
 
+    def _is_valid_wildcard_key(self, key: str) -> bool:
+        """Check if a key (single or combined) is valid"""
+        key = key.strip()
+        if '+' in key:
+            # Combined wildcard - check all parts are valid
+            is_valid, _, _ = self.validate_combined_wildcard(key)
+            return is_valid
+        return key in self.data
+
     def has_wildcards(self, prompt: str) -> bool:
-        """Check if a prompt contains any wildcard syntax"""
+        """Check if a prompt contains any wildcard syntax (single or combined)"""
         if not prompt:
             return False
         pattern = r"\[\s*([^\]]+?)\s*\]"
         matches = re.findall(pattern, prompt)
-        # Check if any of the matches are valid wildcard keys
-        return any(key.strip() in self.data for key in matches)
+        # Check if any of the matches are valid wildcard keys (single or combined)
+        return any(self._is_valid_wildcard_key(key) for key in matches)
 
     def list_wildcards_in_prompt(self, prompt: str) -> List[str]:
-        """List all wildcards used in a prompt"""
+        """List all wildcards used in a prompt (single or combined)"""
         if not prompt:
             return []
         pattern = r"\[\s*([^\]]+?)\s*\]"
         matches = re.findall(pattern, prompt)
-        return [key.strip() for key in matches if key.strip() in self.data]
+        return [key.strip() for key in matches if self._is_valid_wildcard_key(key)]
 
     def get_categories(self) -> Dict[str, List[str]]:
         """Group wildcards by category prefix"""
@@ -219,13 +292,39 @@ if __name__ == "__main__":
     categories = wildcard_manager.get_categories()
     print(f"\nCategories: {list(categories.keys())[:10]}...")
 
-    # Test prompt processing
+    # Test prompt processing - single wildcards
     test_prompt = "A [animal] standing in a [landscape] with [weather] weather"
-    print(f"\nTest prompt: {test_prompt}")
+    print(f"\nTest prompt (single wildcards): {test_prompt}")
 
     for i in range(3):
         result = wildcard_manager.process_prompt(test_prompt)
         print(f"  Variation {i+1}: {result}")
+
+    # Test combined wildcards
+    print("\n" + "=" * 50)
+    print("Testing Combined Wildcards (+ syntax)")
+    print("=" * 50)
+
+    # Find some valid wildcards to combine
+    all_wildcards = wildcard_manager.get_available_wildcards()
+    color_wc = [w for w in all_wildcards if 'color' in w.lower()][:1]
+    animal_wc = [w for w in all_wildcards if 'animal' in w.lower()][:1]
+
+    if color_wc and animal_wc:
+        combined_prompt = f"A [{color_wc[0]}+{animal_wc[0]}] in a mystical forest"
+        print(f"\nCombined prompt: {combined_prompt}")
+        for i in range(3):
+            result = wildcard_manager.process_prompt(combined_prompt)
+            print(f"  Variation {i+1}: {result}")
+    else:
+        print("\nNote: Could not find color/animal wildcards for combined test")
+        # Try a generic combined test with first two wildcards
+        if len(all_wildcards) >= 2:
+            combined_prompt = f"A [{all_wildcards[0]}+{all_wildcards[1]}] scene"
+            print(f"\nCombined prompt: {combined_prompt}")
+            for i in range(3):
+                result = wildcard_manager.process_prompt(combined_prompt)
+                print(f"  Variation {i+1}: {result}")
 
     # Test with seed for reproducibility
     print("\nWith seed=42:")
