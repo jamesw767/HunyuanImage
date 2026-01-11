@@ -86,12 +86,17 @@ def create_prompt_input(
                 scale=1,
                 info="Use local LLM to expand your prompt"
             )
+            models_list = get_ollama_models_list() if ollama_available else OLLAMA_MODELS
+            # Ensure default model is in the list
+            if DEFAULT_OLLAMA_MODEL not in models_list:
+                models_list = [DEFAULT_OLLAMA_MODEL] + models_list
             ollama_model = gr.Dropdown(
                 label="Model",
-                choices=get_ollama_models_list() if ollama_available else OLLAMA_MODELS,
+                choices=models_list,
                 value=DEFAULT_OLLAMA_MODEL,
                 scale=2,
-                interactive=ollama_available
+                interactive=ollama_available,
+                allow_custom_value=True
             )
         with gr.Row():
             ollama_length = gr.Dropdown(

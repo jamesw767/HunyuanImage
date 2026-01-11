@@ -29,7 +29,6 @@ def create_output_display() -> OutputDisplayComponents:
     output_image = gr.Image(
         label="Generated Image",
         type="filepath",
-        show_download_button=True,
         height=512,
     )
 
