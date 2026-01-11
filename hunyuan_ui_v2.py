@@ -123,10 +123,23 @@ def generate_image(
     ollama_length: str,
     ollama_complexity: str,
 ):
-    """Generate image(s) with the HunyuanImage model."""
+    """Generate image(s) with the HunyuanImage model.
+
+    If model is currently loading, waits for it to complete.
+    """
+    from ui.state import get_state
+    app_state = get_state()
+
+    # Wait for model if it's currently loading
+    if app_state.model_load_lock.locked():
+        yield None, "Model is loading... waiting for it to complete.", "", seed
+        # Wait for lock to be released (model finished loading)
+        with app_state.model_load_lock:
+            pass  # Lock acquired and released = loading finished
+        yield None, "Model loaded! Starting generation...", "", seed
 
     if not is_model_loaded():
-        yield None, "Model not loaded. Click 'Load Model' first.", "", seed
+        yield None, "Model not loaded. Click 'Load Image Model' first.", "", seed
         return
 
     model = get_model()

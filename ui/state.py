@@ -20,7 +20,8 @@ class AppState:
     model_load_lock: threading.Lock = field(default_factory=threading.Lock)
 
     # GPU configuration
-    selected_gpu: int = 1  # Default to GPU 1 (Blackwell)
+    selected_gpu: int = 1  # Default to GPU 1 (Blackwell) for image generation
+    selected_ollama_gpu: int = 0  # Default to GPU 0 for Ollama LLM
     available_gpus: List[Dict] = field(default_factory=list)
 
     # Batch state
@@ -62,7 +63,11 @@ def get_state() -> AppState:
 
 
 def detect_gpus() -> List[Dict]:
-    """Detect available CUDA GPUs and return info."""
+    """Detect available CUDA GPUs using PyTorch indexing (not nvidia-smi).
+
+    Note: PyTorch GPU indices may differ from nvidia-smi ordering.
+    We use PyTorch's view since that's what the model uses.
+    """
     gpus = []
     try:
         import torch
@@ -73,7 +78,7 @@ def detect_gpus() -> List[Dict]:
                     'index': i,
                     'name': props.name,
                     'memory_gb': props.total_memory / (1024**3),
-                    'display': f"GPU {i}: {props.name} ({props.total_memory / (1024**3):.0f} GB)"
+                    'display': f"PyTorch GPU {i}: {props.name} ({props.total_memory / (1024**3):.0f} GB)"
                 })
     except Exception as e:
         print(f"[GPU] Error detecting GPUs: {e}")
@@ -81,7 +86,7 @@ def detect_gpus() -> List[Dict]:
 
 
 def set_gpu(gpu_index: int) -> str:
-    """Set the active GPU for CUDA operations."""
+    """Set the active GPU for image generation (CUDA operations)."""
     state = get_state()
     state.selected_gpu = gpu_index
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
@@ -89,8 +94,21 @@ def set_gpu(gpu_index: int) -> str:
     # Find GPU name for confirmation
     for gpu in state.available_gpus:
         if gpu['index'] == gpu_index:
-            return f"GPU set to: {gpu['name']}"
-    return f"GPU set to index {gpu_index}"
+            return f"Image GPU set to: {gpu['name']}"
+    return f"Image GPU set to index {gpu_index}"
+
+
+def set_ollama_gpu(gpu_index: int) -> str:
+    """Set the GPU for Ollama LLM operations."""
+    state = get_state()
+    state.selected_ollama_gpu = gpu_index
+
+    # Ollama uses CUDA_VISIBLE_DEVICES when it starts
+    # We'll pass this when restarting Ollama
+    for gpu in state.available_gpus:
+        if gpu['index'] == gpu_index:
+            return f"Ollama GPU set to: {gpu['name']}"
+    return f"Ollama GPU set to index {gpu_index}"
 
 
 def init_gpus() -> None:
