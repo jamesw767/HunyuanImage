@@ -34,6 +34,7 @@ from ui.components import (
     wire_output_display_events,
     get_steps_from_quality,
     get_size_from_aspect,
+    create_batch_panel,
 )
 
 # Initialize Ollama if available
@@ -128,14 +129,8 @@ def create_test_ui():
             ]
         )
 
-        # Batch accordion placeholder
-        with gr.Accordion("Batch Generation", open=True):
-            gr.Markdown("""
-            **Batch panel will go here**
-
-            This accordion opens by default for batch-heavy workflows.
-            The full batch configuration will be extracted to its own component.
-            """)
+        # Batch Panel (opens by default for batch-heavy workflows)
+        batch = create_batch_panel(open_by_default=True)
 
         # Recent gallery placeholder
         with gr.Accordion("Recent Generations", open=False):

@@ -30,6 +30,13 @@ from ui.components.output_display import (
     wire_output_display_events,
 )
 
+from ui.components.batch_panel import (
+    BatchPanelComponents,
+    BatchConfigComponents,
+    PromptRunComponents,
+    create_batch_panel,
+)
+
 __all__ = [
     # System bar
     'SystemBarComponents',
@@ -50,4 +57,9 @@ __all__ = [
     'OutputDisplayComponents',
     'create_output_display',
     'wire_output_display_events',
+    # Batch panel
+    'BatchPanelComponents',
+    'BatchConfigComponents',
+    'PromptRunComponents',
+    'create_batch_panel',
 ]
