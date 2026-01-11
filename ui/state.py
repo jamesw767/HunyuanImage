@@ -86,15 +86,19 @@ def detect_gpus() -> List[Dict]:
 
 
 def set_gpu(gpu_index: int) -> str:
-    """Set the active GPU for image generation (CUDA operations)."""
+    """Set the active GPU for image generation.
+
+    Note: We don't set CUDA_VISIBLE_DEVICES anymore.
+    Instead, we use device_map='cuda:N' when loading the model.
+    This allows all GPUs to remain visible.
+    """
     state = get_state()
     state.selected_gpu = gpu_index
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
 
     # Find GPU name for confirmation
     for gpu in state.available_gpus:
         if gpu['index'] == gpu_index:
-            return f"Image GPU set to: {gpu['name']}"
+            return f"Image GPU set to: GPU {gpu_index} ({gpu['name']})"
     return f"Image GPU set to index {gpu_index}"
 
 

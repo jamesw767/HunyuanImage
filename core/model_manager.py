@@ -39,10 +39,11 @@ def load_model() -> Generator[str, None, None]:
             return
 
         # Check if GPU already has significant memory usage
+        gpu_idx = state.selected_gpu
         if torch.cuda.is_available():
-            mem_used = torch.cuda.memory_allocated(0) / (1024**3)
+            mem_used = torch.cuda.memory_allocated(gpu_idx) / (1024**3)
             if mem_used > 30:  # More than 30GB suggests model is already loaded
-                yield f"WARNING: GPU already has {mem_used:.1f}GB allocated. Model may already be loaded."
+                yield f"WARNING: GPU {gpu_idx} already has {mem_used:.1f}GB allocated. Model may already be loaded."
                 yield "If you want to reload, unload first."
                 return
 
@@ -55,15 +56,19 @@ def load_model() -> Generator[str, None, None]:
 
         model_id = str(MODEL_PATH)
 
-        print(f"[LOAD] Step 3: Loading model from {model_id}...")
-        yield "Step 2: Loading quantized HunyuanImage-3.0 model on GPU... (this may take 1-2 minutes)"
+        # Get selected GPU from state
+        gpu_index = state.selected_gpu
+        device = f"cuda:{gpu_index}"
+
+        print(f"[LOAD] Step 3: Loading model from {model_id} to {device}...")
+        yield f"Step 2: Loading quantized HunyuanImage-3.0 on GPU {gpu_index}... (this may take 1-2 minutes)"
 
         state.model = AutoModelForCausalLM.from_pretrained(
             model_id,
             attn_implementation="sdpa",
             trust_remote_code=True,
             torch_dtype=torch.bfloat16,
-            device_map="cuda:0",
+            device_map=device,
             moe_impl="eager",
             local_files_only=True,
         )
@@ -139,23 +144,25 @@ def get_model_status() -> str:
 
     status_lines = []
 
+    gpu_idx = state.selected_gpu
+
     if state.model_loaded and state.model is not None:
-        status_lines.append("**Image Model: LOADED**")
+        status_lines.append(f"**Image Model: LOADED** (GPU {gpu_idx})")
     else:
-        status_lines.append("**Image Model: NOT LOADED**")
+        status_lines.append(f"**Image Model: NOT LOADED** (will use GPU {gpu_idx})")
 
     if torch.cuda.is_available():
         try:
-            gpu_name = torch.cuda.get_device_name(0)
-            mem_used = torch.cuda.memory_allocated(0) / (1024**3)
-            mem_total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            gpu_name = torch.cuda.get_device_name(gpu_idx)
+            mem_used = torch.cuda.memory_allocated(gpu_idx) / (1024**3)
+            mem_total = torch.cuda.get_device_properties(gpu_idx).total_memory / (1024**3)
 
-            status_lines.append(f"GPU: {gpu_name}")
-            status_lines.append(f"Memory: {mem_used:.1f}GB used / {mem_total:.1f}GB total")
+            status_lines.append(f"GPU {gpu_idx}: {gpu_name}")
+            status_lines.append(f"Memory: {mem_used:.1f}GB / {mem_total:.1f}GB")
 
             if not state.model_loaded:
                 status_lines.append("")
-                status_lines.append("*GPU is free for LLM prompt generation*")
+                status_lines.append("*Ready to load*")
         except Exception as e:
             status_lines.append(f"GPU info error: {e}")
     else:

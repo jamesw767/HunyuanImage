@@ -16,6 +16,10 @@ import sys
 # Add project to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# NOTE: We don't set CUDA_VISIBLE_DEVICES here
+# Instead we use device_map="cuda:N" to target specific GPUs
+# This allows runtime GPU selection without restart
+
 # Force offline mode
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
