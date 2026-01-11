@@ -7,6 +7,7 @@ without requiring external API keys.
 """
 
 import json
+import re
 import requests
 from typing import Optional, List, Dict, Generator
 from dataclasses import dataclass
@@ -14,6 +15,43 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def strip_thinking_tags(text: str) -> str:
+    """
+    Remove thinking/reasoning tags from model output and clean up encoding.
+
+    Many newer models (Qwen3, DeepSeek R1, etc.) output chain-of-thought
+    reasoning wrapped in <think>...</think> or similar tags.
+    This function strips those out to get just the final answer.
+    """
+    if not text:
+        return text
+
+    # Decode unicode escapes (e.g., \u2014 -> —)
+    try:
+        # Handle double-encoded JSON strings
+        if '\\u' in text:
+            text = text.encode('utf-8').decode('unicode_escape')
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        pass  # Keep original if decoding fails
+
+    # Remove <think>...</think> blocks (Qwen3, DeepSeek style)
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
+
+    # Remove <reasoning>...</reasoning> blocks
+    text = re.sub(r'<reasoning>.*?</reasoning>', '', text, flags=re.DOTALL | re.IGNORECASE)
+
+    # Remove <reflection>...</reflection> blocks
+    text = re.sub(r'<reflection>.*?</reflection>', '', text, flags=re.DOTALL | re.IGNORECASE)
+
+    # Remove ```thinking ... ``` blocks
+    text = re.sub(r'```thinking.*?```', '', text, flags=re.DOTALL | re.IGNORECASE)
+
+    # Clean up any leftover whitespace
+    text = re.sub(r'\n{3,}', '\n\n', text)  # Multiple newlines to double
+
+    return text.strip()
 
 # Default configuration
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
@@ -73,7 +111,9 @@ RULES:
 - Output ONLY the enhanced prompt text, no explanations or labels
 - Stay within the {length_info['words']} word limit
 - Be creative but stay true to what was requested
-- Don't add inappropriate or unsafe content"""
+- Don't add inappropriate or unsafe content
+- Do NOT use <think> tags or any reasoning - respond directly with the prompt only
+- No preamble, no explanation, just the enhanced prompt text"""
 
 
 def get_generation_system_prompt(length: str = "medium", complexity: str = "detailed") -> str:
@@ -91,7 +131,10 @@ COMPLEXITY LEVEL: {complexity} - {complexity_info['desc']}
 WHAT TO INCLUDE IN EACH PROMPT:
 {complexity_info['elements']}
 
-Output ONLY the prompts, one per line, no numbering or explanations."""
+CRITICAL RULES:
+- Output ONLY the prompts, one per line, no numbering or explanations
+- Do NOT use <think> tags or any reasoning - respond directly with prompts only
+- No preamble, no meta-commentary, just the prompt text"""
 
 
 # Legacy system prompts (for backward compatibility)
@@ -221,8 +264,11 @@ class OllamaClient:
 
             if response.status_code == 200:
                 data = response.json()
+                # Strip thinking tags from models that use chain-of-thought
+                raw_text = data.get('response', '')
+                clean_text = strip_thinking_tags(raw_text)
                 return OllamaResponse(
-                    text=data.get('response', '').strip(),
+                    text=clean_text,
                     model=data.get('model', model),
                     total_duration=data.get('total_duration', 0) / 1e9,  # ns to s
                     prompt_eval_count=data.get('prompt_eval_count', 0),
@@ -313,14 +359,15 @@ class PromptEnhancer:
         system_prompt = get_enhance_system_prompt(length, complexity)
 
         # Adjust max tokens based on length setting
+        # Higher values to account for thinking models that may output reasoning
         max_tokens_map = {
-            "minimal": 100,
-            "short": 150,
-            "medium": 256,
-            "long": 384,
-            "detailed": 512,
+            "minimal": 512,
+            "short": 768,
+            "medium": 1024,
+            "long": 1536,
+            "detailed": 2048,
         }
-        max_tokens = max_tokens_map.get(length, 256)
+        max_tokens = max_tokens_map.get(length, 1024)
 
         response = self.client.generate(
             prompt=user_prompt,
@@ -366,14 +413,16 @@ class PromptEnhancer:
         system_prompt = get_generation_system_prompt(length, complexity)
 
         # Adjust max tokens based on length setting
+        # Add base overhead for thinking models, plus per-prompt tokens
         tokens_per_prompt = {
-            "minimal": 50,
-            "short": 80,
-            "medium": 150,
-            "long": 200,
-            "detailed": 300,
+            "minimal": 100,
+            "short": 150,
+            "medium": 250,
+            "long": 350,
+            "detailed": 500,
         }
-        max_tokens = count * tokens_per_prompt.get(length, 150)
+        # Base 1024 tokens for thinking overhead + tokens per prompt
+        max_tokens = 1024 + (count * tokens_per_prompt.get(length, 250))
 
         response = self.client.generate(
             prompt=user_prompt,

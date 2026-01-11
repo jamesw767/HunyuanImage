@@ -82,7 +82,8 @@ except ImportError:
 # Ollama globals
 ollama_enhancer = None
 ollama_generator = None
-OLLAMA_MODELS = ["qwen2.5:7b-instruct", "magistral:24b", "qwen3-next:80b"]
+# Fallback list only used if Ollama server is not running at startup
+OLLAMA_MODELS = ["qwen2.5:7b-instruct"]
 
 # Output directory
 OUTPUT_DIR = Path("/media/james/DataDrive/jamesw767/Hun3d/outputs")
@@ -852,6 +853,19 @@ def check_ollama_status():
         return "Stopped"
 
 
+def refresh_ollama_status_and_models():
+    """Check status and refresh all Ollama model dropdowns"""
+    status = check_ollama_status()
+    models = get_ollama_models_list()
+    # Return status + 3 dropdown updates (ollama_model, batch_ollama_model, wc_llm_model)
+    return (
+        status,
+        gr.update(choices=models, value=models[0] if models else None),
+        gr.update(choices=models, value=models[0] if models else None),
+        gr.update(choices=models, value=models[0] if models else None)
+    )
+
+
 def get_ollama_models_list():
     """Get list of installed Ollama models for dropdown"""
     if not ollama_available or not ollama_manager:
@@ -866,12 +880,13 @@ def get_ollama_models_list():
 
 
 def start_ollama_server():
-    """Start the Ollama server"""
+    """Start the Ollama server and refresh all model dropdowns"""
     if not ollama_available or not ollama_manager:
-        return "Ollama not available", gr.update()
+        return "Ollama not available", gr.update(), gr.update(), gr.update()
     success, msg = ollama_manager.start()
     models = get_ollama_models_list()
-    return msg, gr.update(choices=models, value=models[0] if models else None)
+    dropdown_update = gr.update(choices=models, value=models[0] if models else None)
+    return msg, dropdown_update, dropdown_update, dropdown_update
 
 
 def stop_ollama_server():
@@ -885,36 +900,39 @@ def stop_ollama_server():
 def pull_ollama_model(model_name: str):
     """Pull/install a new Ollama model"""
     if not ollama_available or not ollama_manager:
-        return "Ollama not available", gr.update()
+        return "Ollama not available", gr.update(), gr.update(), gr.update()
 
     if not model_name or not model_name.strip():
-        return "Please enter a model name", gr.update()
+        return "Please enter a model name", gr.update(), gr.update(), gr.update()
 
     # Start server if not running
     if not ollama_manager.is_running():
         ollama_manager.start()
 
-    yield f"Pulling {model_name}... (this may take a while)", gr.update()
+    yield f"Pulling {model_name}... (this may take a while)", gr.update(), gr.update(), gr.update()
 
     def progress_cb(status, pct):
         pass  # Gradio doesn't support real-time updates well in this context
 
     success, msg = ollama_manager.pull_model(model_name.strip())
     models = get_ollama_models_list()
-    yield msg, gr.update(choices=models, value=model_name.strip() if success else (models[0] if models else None))
+    new_value = model_name.strip() if success else (models[0] if models else None)
+    dropdown_update = gr.update(choices=models, value=new_value)
+    yield msg, dropdown_update, dropdown_update, dropdown_update
 
 
 def delete_ollama_model(model_name: str):
     """Delete an Ollama model"""
     if not ollama_available or not ollama_manager:
-        return "Ollama not available", gr.update()
+        return "Ollama not available", gr.update(), gr.update(), gr.update()
 
     if not model_name:
-        return "No model selected", gr.update()
+        return "No model selected", gr.update(), gr.update(), gr.update()
 
     success, msg = ollama_manager.delete_model(model_name)
     models = get_ollama_models_list()
-    return msg, gr.update(choices=models, value=models[0] if models else None)
+    dropdown_update = gr.update(choices=models, value=models[0] if models else None)
+    return msg, dropdown_update, dropdown_update, dropdown_update
 
 
 # ============================================================================
@@ -1389,6 +1407,13 @@ def run_batch_generation(
                     "style": style,
                     "error": str(e)
                 })
+
+                # Clean up GPU memory after error (helps with OOM recovery)
+                import gc
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    print(f"[MEMORY] Cleared cache after error")
 
         # Save results
         with open(batch_dir / "results.json", 'w') as f:
@@ -2257,6 +2282,13 @@ def run_from_prompt_run(
                     })
                     image_counter += 1
 
+                    # Clean up GPU memory after error (helps with OOM recovery)
+                    import gc
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        print(f"[MEMORY] Cleared cache after error")
+
             # End of inner for loop - check if we should continue
             if batch_stop_requested:
                 break
@@ -3029,21 +3061,66 @@ def copy_seed(seed):
     return int(seed) if seed else 0
 
 
-# Example prompts for inspiration
-EXAMPLE_PROMPTS = [
-    ("Majestic Lion", "A majestic lion with a flowing golden mane, standing on a rocky outcrop at sunset, dramatic lighting"),
-    ("Cozy Coffee Shop", "A cozy coffee shop interior with warm lighting, wooden furniture, plants hanging from the ceiling"),
-    ("Cyberpunk City", "A futuristic cityscape at night with neon lights reflecting on wet streets, cyberpunk aesthetic"),
-    ("Japanese Garden", "A serene Japanese garden with a koi pond, cherry blossoms falling, morning mist"),
-    ("Cute Robot", "A cute robot holding a bouquet of flowers, pastel colors, soft lighting, kawaii style"),
-    ("Astronaut", "An astronaut floating in space with Earth in the background, cinematic lighting"),
-    ("Medieval Castle", "A medieval castle on a cliff overlooking the sea, stormy sky, dramatic atmosphere"),
-    ("Gourmet Burger", "A delicious gourmet burger with melting cheese, fresh vegetables, studio food photography"),
-    ("Portrait Woman", "Portrait of a young woman with flowing red hair, green eyes, soft natural lighting"),
-    ("Mountain Lake", "A pristine mountain lake reflecting snow-capped peaks, golden hour, landscape photography"),
-    ("Steampunk Airship", "A magnificent steampunk airship flying through clouds at sunset, intricate brass details"),
-    ("Abstract Art", "Abstract flowing shapes in vibrant colors, modern art, geometric patterns intertwining"),
-]
+# Instructions content for the help accordion
+INSTRUCTIONS_MARKDOWN = """
+### Wildcard System
+
+Use `[category]` syntax in your prompts for random substitution:
+
+**Basic:** `A [animal] in a [landscape]` → "A tiger in a forest"
+
+**Combined:** `A [color+animal]` → "A golden dragon"
+
+Categories use prefixes like `artist-famous`, `color-warm`, `mood-dark`.
+Click **Insert Wildcard** above to browse all available categories.
+
+---
+
+### Prompting Tips for HunyuanImage 3.0
+
+This model is different from Stable Diffusion and FLUX:
+
+- **Write prose, not keywords** — Full sentences work better than comma lists
+- **No bracket weights** — `(word:1.4)` syntax does NOT work here
+- **Embed negatives** — Use "no watermark, no text" in your prompt
+- **Use quotes for text** — `with the text "HELLO" in bold serif`
+- **Be specific** — "85mm lens at f/2.8, golden hour" beats "professional photo"
+
+---
+
+### Prompt Structure
+
+`[Subject] + [Details] + [Setting] + [Lighting] + [Style]`
+
+**Good:** "A weathered lighthouse keeper in his 60s with a salt-and-pepper beard,
+standing in a Victorian lighthouse. Golden hour light streaming through windows,
+creating dramatic rim lighting. Photorealistic, 35mm film grain."
+
+**Bad:** "lighthouse keeper, old man, beard, beautiful, amazing, 8k, masterpiece"
+
+---
+
+### Ollama Enhancement
+
+Enable **"Enhance with Ollama"** to expand simple prompts into detailed descriptions.
+Larger models (24B+) produce more creative results but are slower.
+
+---
+
+### Settings Reference
+
+| CFG Scale | Effect |
+|-----------|--------|
+| 1-3 | Creative/abstract |
+| **5 (default)** | Balanced |
+| 8-15 | Strict adherence |
+
+| Quality | Steps | Use Case |
+|---------|-------|----------|
+| Fast | 15 | Quick tests |
+| **Standard** | 20 | Normal use |
+| High | 30 | Final renders |
+"""
 
 
 # Build the Gradio interface
@@ -3207,24 +3284,9 @@ def create_ui():
                     else:
                         gr.Markdown("*Wildcards not available. Check wildcards.json file.*")
 
-                # Example prompts
-                with gr.Accordion("Example Prompts", open=False):
-                    with gr.Row():
-                        for i in range(0, 6, 2):
-                            with gr.Column():
-                                for j in range(2):
-                                    if i + j < len(EXAMPLE_PROMPTS):
-                                        name, text = EXAMPLE_PROMPTS[i + j]
-                                        btn = gr.Button(name, size="sm")
-                                        btn.click(fn=lambda t=text: t, outputs=prompt)
-                    with gr.Row():
-                        for i in range(6, 12, 2):
-                            with gr.Column():
-                                for j in range(2):
-                                    if i + j < len(EXAMPLE_PROMPTS):
-                                        name, text = EXAMPLE_PROMPTS[i + j]
-                                        btn = gr.Button(name, size="sm")
-                                        btn.click(fn=lambda t=text: t, outputs=prompt)
+                # Instructions accordion
+                with gr.Accordion("Instructions & Tips", open=False):
+                    gr.Markdown(INSTRUCTIONS_MARKDOWN)
 
                 # Main Generation Settings (Always Visible)
                 with gr.Group():
@@ -4234,13 +4296,13 @@ def create_ui():
 
         # Ollama server control handlers
         refresh_ollama.click(
-            fn=check_ollama_status,
-            outputs=[ollama_status]
+            fn=refresh_ollama_status_and_models,
+            outputs=[ollama_status, ollama_model, batch_ollama_model, wc_llm_model]
         )
 
         start_ollama_btn.click(
             fn=start_ollama_server,
-            outputs=[ollama_status, ollama_model]
+            outputs=[ollama_status, ollama_model, batch_ollama_model, wc_llm_model]
         )
 
         stop_ollama_btn.click(
@@ -4251,13 +4313,13 @@ def create_ui():
         pull_model_btn.click(
             fn=pull_ollama_model,
             inputs=[new_model_name],
-            outputs=[model_action_status, ollama_model]
+            outputs=[model_action_status, ollama_model, batch_ollama_model, wc_llm_model]
         )
 
         delete_model_btn.click(
             fn=delete_ollama_model,
             inputs=[ollama_model],
-            outputs=[model_action_status, ollama_model]
+            outputs=[model_action_status, ollama_model, batch_ollama_model, wc_llm_model]
         )
 
         # Model load/unload handlers
