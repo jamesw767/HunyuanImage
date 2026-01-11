@@ -131,6 +131,13 @@ def generate_image(
 
     If model is currently loading, waits for it to complete.
     """
+    print(f"[GENERATE] Starting generation: prompt='{prompt[:50]}...'")
+
+    # Check for empty prompt
+    if not prompt or not prompt.strip():
+        yield None, "Please enter a prompt first.", "", seed
+        return
+
     from ui.state import get_state
     app_state = get_state()
 
@@ -145,6 +152,8 @@ def generate_image(
     if not is_model_loaded():
         yield None, "Model not loaded. Click 'Load Image Model' first.", "", seed
         return
+
+    print(f"[GENERATE] Model is loaded, proceeding...")
 
     model = get_model()
     steps = get_steps_from_quality(quality)
@@ -188,6 +197,7 @@ def generate_image(
 
         try:
             start_time = time.time()
+            print(f"[GENERATE] Calling model.generate_image with size={image_size}, steps={steps}, seed={current_seed}")
 
             image = model.generate_image(
                 full_prompt,
@@ -198,6 +208,7 @@ def generate_image(
             )
 
             gen_time = time.time() - start_time
+            print(f"[GENERATE] Image generated in {gen_time:.1f}s")
 
             # Save image
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -205,6 +216,7 @@ def generate_image(
             filename = f"{timestamp}_{current_seed}_{safe_prompt}.png"
             filepath = session_dir / filename
             image.save(str(filepath))
+            print(f"[GENERATE] Saved to {filepath}")
 
             # Save config
             config = {
@@ -230,6 +242,10 @@ def generate_image(
 
         except Exception as e:
             import gc
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"[GENERATE ERROR] {e}")
+            print(f"[GENERATE TRACEBACK]\n{error_details}")
             gc.collect()
             torch.cuda.empty_cache()
             yield last_image, f"Error on image {i+1}: {e}", "", last_seed
