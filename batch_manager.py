@@ -317,17 +317,21 @@ def load_batch_config_full(config_name: str) -> List[Any]:
 
         themes_count = len(config.get('themes', '').split('\n')) if config.get('themes') else 0
 
+        # Handle both batch config and single image config field names
+        enhance = config.get('enhance_prompts') if 'enhance_prompts' in config else config.get('use_ollama', True)
+        quality = config.get('quality_preset') or config.get('quality', 'Standard')
+
         return [
             gr.update(value=config.get('batch_name', '')),
-            gr.update(value=config.get('themes', '')),
+            gr.update(value=config.get('themes', config.get('prompt', ''))),  # Single image uses 'prompt'
             gr.update(value=config.get('variations_per_theme', 3)),
-            gr.update(value=config.get('styles', [])),
+            gr.update(value=config.get('styles', [config.get('style', 'None')] if config.get('style') else [])),
             gr.update(value=config.get('images_per_combo', 1)),
             gr.update(value=config.get('llm_backend', 'Ollama')),
             gr.update(value=config.get('ollama_model', 'qwen2.5:7b-instruct')),
-            gr.update(value=config.get('enhance_prompts', True)),
+            gr.update(value=enhance),
             gr.update(value=config.get('aspect_ratio', '1:1 (Square)')),
-            gr.update(value=config.get('quality_preset', 'Standard')),
+            gr.update(value=quality),
             gr.update(value=config.get('random_seeds', True)),
             gr.update(value=config.get('negative_prompt', '')),
             gr.update(value=config.get('ollama_length', 'medium')),

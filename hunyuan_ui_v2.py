@@ -622,15 +622,17 @@ def load_settings_from_json(file_obj):
         with open(file_path, 'r') as f:
             config = json.load(f)
 
-        # Extract settings with defaults
+        # Extract settings with defaults (handle both single image and batch field names)
         prompt = config.get('prompt', '')
         negative_prompt = config.get('negative_prompt', '')
         style = config.get('style', 'None')
         aspect_ratio = config.get('aspect_ratio', '1:1 (Square)')
-        quality = config.get('quality', 'Standard (20 steps)')
+        # Handle both 'quality' and 'quality_preset' field names
+        quality = config.get('quality') or config.get('quality_preset', 'Standard (20 steps)')
         seed = config.get('seed', -1)
         batch_count = config.get('batch_count', 1)
-        use_ollama = config.get('use_ollama', False)
+        # Handle both 'use_ollama' and 'enhance_prompts' field names
+        use_ollama = config.get('use_ollama') if 'use_ollama' in config else config.get('enhance_prompts', False)
         ollama_model = config.get('ollama_model', 'qwen2.5:7b-instruct')
         ollama_length = config.get('ollama_length', 'medium')
         ollama_complexity = config.get('ollama_complexity', 'detailed')
