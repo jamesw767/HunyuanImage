@@ -41,6 +41,8 @@ class AppState:
     # Session state
     current_session_dir: Optional[Path] = None
     session_counter: int = 0
+    last_generated_image: Optional[str] = None  # Path to most recently generated image
+    last_seed_used: int = 0  # Seed of most recently generated image
 
     # Custom batch directory
     custom_batch_base_dir: Optional[str] = None

@@ -345,6 +345,12 @@ def generate_image(
             last_image = str(filepath)
             last_seed = current_seed
 
+            # Store in state for UI refresh
+            from ui.state import get_state as get_app_state
+            app_state = get_app_state()
+            app_state.last_generated_image = str(filepath)
+            app_state.last_seed_used = current_seed
+
             info = f"Size: {image_size} | Steps: {steps} | Time: {gen_time:.1f}s"
             yield last_image, f"Generated {i+1}/{int(batch_count)}", info, last_seed
 
@@ -583,6 +589,10 @@ def process_queue_item(item: dict):
             filepath = session_dir / filename
             image.save(str(filepath))
             print(f"[QUEUE ITEM {gen_id}] Saved: {filename}", flush=True)
+
+            # Store in state for UI refresh
+            app_state.last_generated_image = str(filepath)
+            app_state.last_seed_used = current_seed
 
             # Save config with all fields needed to recreate
             config = {
@@ -1424,10 +1434,20 @@ def reload_styles():
 
 
 def refresh_latest_image():
-    """Get the most recently generated image and queue status."""
+    """Get the most recently generated image, seed, and queue status."""
     app_state = get_state()
 
-    # Find most recent image in current session or output dir
+    # First check if we have a last generated image in state (most reliable)
+    if app_state.last_generated_image and Path(app_state.last_generated_image).exists():
+        queue_status = get_queue_status()
+        return (
+            app_state.last_generated_image,
+            f"Latest: {Path(app_state.last_generated_image).name}",
+            queue_status,
+            app_state.last_seed_used
+        )
+
+    # Fallback: Find most recent image in current session or output dir
     latest_image = None
     latest_time = 0
 
@@ -1443,9 +1463,19 @@ def refresh_latest_image():
                 pass
 
     queue_status = get_queue_status()
-    status_msg = "Refreshed" if latest_image else "No images found"
+    status_msg = f"Latest: {Path(latest_image).name}" if latest_image else "No images found"
 
-    return latest_image, status_msg, queue_status
+    # Try to extract seed from filename (format: timestamp_seed_name.png)
+    seed = 0
+    if latest_image:
+        try:
+            parts = Path(latest_image).stem.split('_')
+            if len(parts) >= 2:
+                seed = int(parts[1])
+        except (ValueError, IndexError):
+            pass
+
+    return latest_image, status_msg, queue_status, seed
 
 
 def create_ui():
@@ -1522,11 +1552,11 @@ def create_ui():
             outputs=[output.queue_status]
         )
 
-        # Wire refresh button to show latest image and queue status
+        # Wire refresh button to show latest image, seed, and queue status
         output.refresh_btn.click(
             fn=refresh_latest_image,
             inputs=[],
-            outputs=[output.output_image, output.status_text, output.queue_status]
+            outputs=[output.output_image, output.status_text, output.queue_status, output.last_seed]
         )
 
         # Wire load settings button to populate all fields from JSON
