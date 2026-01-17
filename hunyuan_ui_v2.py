@@ -878,6 +878,7 @@ def start_batch_generation(
                         yield f"Iter {iteration_idx+1}/{total_iterations} | #{total_count + 1}: {theme[:25]}... ({style})", str(batch_dir), generated_images
 
                         print(f"[BATCH] Calling model.generate_image()...", flush=True)
+                        start_time = time.time()
                         image = model.generate_image(
                             full_prompt,
                             current_seed,
@@ -885,22 +886,33 @@ def start_batch_generation(
                             stream=True,
                             diff_infer_steps=steps
                         )
-                        print(f"[BATCH] generate_image returned: {type(image)}", flush=True)
+                        gen_time = time.time() - start_time
+                        print(f"[BATCH] generate_image returned: {type(image)} in {gen_time:.1f}s", flush=True)
 
                         if image:
                             filename = f"{total_count:04d}_{current_seed}_{style.replace(' ', '_')[:20]}.png"
                             filepath = batch_dir / filename
                             image.save(str(filepath))
 
-                            # Save config
+                            # Save config (matching single image format)
                             config = {
                                 "prompt": theme,
                                 "full_prompt": full_prompt,
+                                "negative_prompt": negative_prompt,
                                 "style": style,
-                                "seed": current_seed,
-                                "steps": steps,
+                                "aspect_ratio": aspect_ratio,
+                                "quality": quality,
                                 "image_size": image_size,
+                                "steps": steps,
+                                "seed": current_seed,
+                                "use_ollama": enhance,
+                                "ollama_model": ollama_model if enhance else None,
+                                "ollama_length": ollama_length if enhance else None,
+                                "ollama_complexity": ollama_complexity if enhance else None,
+                                "generation_time": gen_time,
                                 "batch_name": batch_name,
+                                "batch_iteration": iteration_idx + 1,
+                                "batch_total_iterations": total_iterations,
                             }
                             save_image_config(str(filepath), config)
 

@@ -25,6 +25,7 @@ import gc
 import json
 import random
 import argparse
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -282,6 +283,7 @@ def run_batch(
                 print(f"  Prompt: {full_prompt[:80]}...")
 
                 try:
+                    start_time = time.time()
                     image = model.generate_image(
                         full_prompt,
                         seed,
@@ -289,21 +291,32 @@ def run_batch(
                         stream=True,
                         diff_infer_steps=steps
                     )
+                    gen_time = time.time() - start_time
 
                     if image:
                         filename = f"{count:04d}_{seed}_{style.replace(' ', '_')[:20]}.png"
                         filepath = batch_dir / filename
                         image.save(str(filepath))
 
-                        # Save config sidecar
+                        # Save config sidecar (matching UI format)
                         config = {
                             "prompt": base_prompt,
                             "full_prompt": full_prompt,
+                            "negative_prompt": negative_prompt,
                             "style": style,
-                            "seed": seed,
+                            "aspect_ratio": None,  # CLI uses resolution directly
+                            "quality": None,  # CLI uses steps directly
+                            "image_size": resolution,
                             "steps": steps,
-                            "resolution": resolution,
-                            "iteration": iteration + 1,
+                            "seed": seed,
+                            "use_ollama": enhance,
+                            "ollama_model": ollama_model if enhance else None,
+                            "ollama_length": ollama_length if enhance else None,
+                            "ollama_complexity": ollama_complexity if enhance else None,
+                            "generation_time": gen_time,
+                            "batch_name": batch_name,
+                            "batch_iteration": iteration + 1,
+                            "batch_total_iterations": iterations,
                         }
                         config_path = filepath.with_suffix('.json')
                         with open(config_path, 'w') as f:
