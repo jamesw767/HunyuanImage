@@ -17,6 +17,9 @@ class OutputDisplayComponents:
     copy_seed_btn: gr.Button
     generate_btn: gr.Button
     stop_btn: gr.Button
+    queue_status: gr.Textbox
+    clear_queue_btn: gr.Button
+    refresh_btn: gr.Button
 
 
 def create_output_display() -> OutputDisplayComponents:
@@ -68,13 +71,34 @@ def create_output_display() -> OutputDisplayComponents:
     # Generate and Stop buttons
     with gr.Row():
         generate_btn = gr.Button(
-            "Generate",
+            "Generate (+ Queue)",
             variant="primary",
             scale=2
         )
         stop_btn = gr.Button(
             "Stop",
             variant="stop",
+            scale=1
+        )
+
+    # Queue status
+    with gr.Row():
+        queue_status = gr.Textbox(
+            label="Queue",
+            value="Queue: 0 pending",
+            interactive=False,
+            scale=2
+        )
+        clear_queue_btn = gr.Button(
+            "Clear Queue",
+            variant="secondary",
+            size="sm",
+            scale=1
+        )
+        refresh_btn = gr.Button(
+            "Refresh",
+            variant="secondary",
+            size="sm",
             scale=1
         )
 
@@ -86,6 +110,9 @@ def create_output_display() -> OutputDisplayComponents:
         copy_seed_btn=copy_seed_btn,
         generate_btn=generate_btn,
         stop_btn=stop_btn,
+        queue_status=queue_status,
+        clear_queue_btn=clear_queue_btn,
+        refresh_btn=refresh_btn,
     )
 
 

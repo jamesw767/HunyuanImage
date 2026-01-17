@@ -144,6 +144,7 @@ def get_model_status() -> str:
 
     status_lines = []
 
+    # Image model status
     gpu_idx = state.selected_gpu
 
     if state.model_loaded and state.model is not None:
@@ -161,12 +162,36 @@ def get_model_status() -> str:
             status_lines.append(f"Memory: {mem_used:.1f}GB / {mem_total:.1f}GB")
 
             if not state.model_loaded:
-                status_lines.append("")
                 status_lines.append("*Ready to load*")
         except Exception as e:
             status_lines.append(f"GPU info error: {e}")
     else:
         status_lines.append("No CUDA GPU available")
+
+    # LLM/Ollama status
+    status_lines.append("")  # Separator
+    llm_gpu_idx = state.selected_ollama_gpu
+
+    if state.ollama_available and state.ollama_manager:
+        try:
+            if state.ollama_manager.is_running():
+                models = state.ollama_manager.list_models()
+                if models:
+                    model_names = [m['name'] for m in models[:3]]  # Show first 3
+                    models_str = ", ".join(model_names)
+                    if len(models) > 3:
+                        models_str += f" (+{len(models)-3} more)"
+                    status_lines.append(f"**LLM: RUNNING** (GPU {llm_gpu_idx})")
+                    status_lines.append(f"Models: {models_str}")
+                else:
+                    status_lines.append(f"**LLM: RUNNING** (GPU {llm_gpu_idx}, no models)")
+            else:
+                status_lines.append(f"**LLM: NOT RUNNING** (will use GPU {llm_gpu_idx})")
+                status_lines.append("*Start with: ollama serve*")
+        except Exception as e:
+            status_lines.append(f"**LLM: ERROR** - {e}")
+    else:
+        status_lines.append("**LLM: NOT AVAILABLE**")
 
     return "\n".join(status_lines)
 

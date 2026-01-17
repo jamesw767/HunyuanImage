@@ -70,7 +70,7 @@ The main UI sets this automatically in `hunyuan_ui.py:2168`.
 - Model: HunyuanImage-3.0 quantized with SDNQ (uint4-svd-r32)
 - Loads via transformers with `trust_remote_code=True`
 - Uses `moe_impl="eager"` for MoE layers
-- Generation method: `model.generate_image(prompt, seed, image_size, diff_infer_steps, stream=True)`
+- Generation method: `model.generate_image(prompt, seed, image_size, stream=True, diff_infer_steps=steps)`
 
 ## CLI Tools
 

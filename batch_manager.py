@@ -71,6 +71,128 @@ def get_config_choices() -> List[str]:
     return [c['filename'] for c in configs]
 
 
+def refresh_config_dropdown() -> Any:
+    """Refresh the batch config dropdown choices"""
+    choices = get_config_choices()
+    return gr.update(choices=choices, value=choices[0] if choices else None)
+
+
+def import_batch_from_directory(dir_path: str) -> Tuple[List[Any], str]:
+    """
+    Import images from a directory and create a batch config from their prompts.
+
+    Scans the directory for images (.png, .jpg, .jpeg, .webp) and reads their
+    JSON sidecar files to extract prompts. Creates a batch config with unique
+    prompts as themes.
+
+    Returns:
+        Tuple of (list of gr.update() for all batch config fields, status message)
+    """
+    if not dir_path or not dir_path.strip():
+        return [gr.update()] * 15, "Please enter a directory path"
+
+    dir_path = Path(dir_path.strip())
+
+    if not dir_path.exists():
+        return [gr.update()] * 15, f"Directory not found: {dir_path}"
+
+    if not dir_path.is_dir():
+        return [gr.update()] * 15, f"Path is not a directory: {dir_path}"
+
+    # Find all image files
+    image_extensions = {'.png', '.jpg', '.jpeg', '.webp'}
+    images = []
+    for ext in image_extensions:
+        images.extend(dir_path.glob(f"*{ext}"))
+        images.extend(dir_path.glob(f"*{ext.upper()}"))
+
+    if not images:
+        return [gr.update()] * 15, f"No images found in: {dir_path}"
+
+    # Extract prompts from JSON sidecars
+    prompts = []
+    styles_found = set()
+    aspect_ratios_found = []
+    quality_presets_found = []
+    negative_prompts_found = []
+
+    for img_path in sorted(images):
+        json_path = img_path.with_suffix('.json')
+        if json_path.exists():
+            try:
+                with open(json_path, 'r') as f:
+                    config = json.load(f)
+
+                prompt = config.get('prompt', '')
+                if prompt and prompt not in prompts:
+                    prompts.append(prompt)
+
+                # Collect other settings for defaults
+                if config.get('style'):
+                    styles_found.add(config['style'])
+                if config.get('aspect_ratio'):
+                    aspect_ratios_found.append(config['aspect_ratio'])
+                if config.get('quality_preset'):
+                    quality_presets_found.append(config['quality_preset'])
+                if config.get('negative_prompt'):
+                    negative_prompts_found.append(config['negative_prompt'])
+
+            except Exception:
+                continue
+
+    if not prompts:
+        # Try to extract from filenames if no JSON files
+        for img_path in sorted(images):
+            # Remove common prefixes/suffixes and extension
+            name = img_path.stem
+            # Remove timestamp patterns like _20250101_123456
+            import re
+            name = re.sub(r'_\d{8}_\d{6}$', '', name)
+            name = re.sub(r'_\d+$', '', name)  # Remove trailing numbers
+            if name and name not in prompts:
+                prompts.append(name)
+
+    if not prompts:
+        return [gr.update()] * 15, f"Could not extract any prompts from {len(images)} images"
+
+    # Determine most common values for defaults
+    def most_common(lst):
+        if not lst:
+            return None
+        from collections import Counter
+        return Counter(lst).most_common(1)[0][0]
+
+    default_aspect = most_common(aspect_ratios_found) or "1:1 (Square)"
+    default_quality = most_common(quality_presets_found) or "Standard"
+    default_negative = most_common(negative_prompts_found) or ""
+    default_styles = list(styles_found) if styles_found else ["Photorealistic"]
+
+    # Create batch name from directory
+    batch_name = f"imported_{dir_path.name}"
+    themes_text = '\n'.join(prompts)
+
+    status = f"Imported {len(prompts)} unique prompts from {len(images)} images in {dir_path.name}"
+
+    # Return updates for all batch config fields (same order as load_batch_config_full)
+    return [
+        gr.update(value=batch_name),           # batch_name
+        gr.update(value=themes_text),          # batch_themes
+        gr.update(value=1),                    # batch_variations
+        gr.update(value=default_styles),       # batch_styles
+        gr.update(value=1),                    # batch_images_per
+        gr.update(value="Ollama"),             # batch_llm_backend
+        gr.update(value="qwen2.5:7b-instruct"), # batch_ollama_model
+        gr.update(value=False),                # batch_enhance (off since prompts already exist)
+        gr.update(value=default_aspect),       # batch_aspect
+        gr.update(value=default_quality),      # batch_quality
+        gr.update(value=True),                 # batch_random_seeds
+        gr.update(value=default_negative),     # batch_negative_prompt
+        gr.update(value="medium"),             # batch_ollama_length
+        gr.update(value="detailed"),           # batch_ollama_complexity
+        gr.update(value=batch_name),           # config_name_input
+    ], status
+
+
 def get_config_display_choices() -> List[Tuple[str, str]]:
     """Get list of (display_name, filename) tuples for dropdown"""
     configs = get_saved_batch_configs_with_info()

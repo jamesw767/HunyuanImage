@@ -64,6 +64,8 @@ LENGTH_PRESETS = {
     "medium": {"words": "50-100", "desc": "Balanced detail"},
     "long": {"words": "100-150", "desc": "Rich detail"},
     "detailed": {"words": "150-250", "desc": "Maximum detail"},
+    "cinematic": {"words": "250-400", "desc": "Epic film-quality scene description"},
+    "experimental": {"words": "300-500", "desc": "Wild, surreal, boundary-pushing"},
 }
 
 # Complexity presets
@@ -71,10 +73,6 @@ COMPLEXITY_PRESETS = {
     "simple": {
         "desc": "Basic subject description only",
         "elements": "Focus only on the main subject. No complex lighting, composition, or technical terms.",
-    },
-    "basic": {
-        "desc": "Subject with basic setting",
-        "elements": "Include subject and simple environment. Basic lighting (daylight, night). Minimal technical terms.",
     },
     "moderate": {
         "desc": "Subject, setting, and mood",
@@ -87,6 +85,32 @@ COMPLEXITY_PRESETS = {
     "complex": {
         "desc": "Maximum artistic detail",
         "elements": "Include extensive details: materials, textures, specific lighting setups, advanced composition techniques, color palettes, artistic references, and rendering style.",
+    },
+    "cinematic": {
+        "desc": "Epic film director's vision",
+        "elements": """Create an immersive, film-quality scene description like a master cinematographer would envision:
+- SUBJECT: Exhaustive detail on the main subject - physical characteristics, pose, expression, clothing/materials with textures
+- ENVIRONMENT: Rich world-building - architectural details, environmental storytelling, background elements that add depth
+- CAMERA: Specific shot type (extreme close-up, medium shot, wide establishing shot), camera movement suggestion, lens choice (35mm, 85mm portrait, anamorphic), depth of field
+- LIGHTING: Dramatic lighting setup - key light direction, fill ratios, rim lights, practical lights in scene, time of day, weather affecting light
+- COLOR: Specific color palette and color grading style (teal and orange, desaturated, vibrant, monochromatic accent)
+- ATMOSPHERE: Mood, emotional tone, narrative tension, environmental effects (fog, dust motes, rain, volumetric light rays)
+- STYLE: Art direction references, rendering technique, quality markers (8K, hyperdetailed, photorealistic, masterwork)
+- COMPOSITION: Rule of thirds placement, leading lines, framing elements, foreground/midground/background layers""",
+    },
+    "experimental": {
+        "desc": "Wild, surreal, boundary-pushing artistic vision",
+        "elements": """Push creative boundaries and generate unexpected, visually striking scenes. Be bold and experimental:
+- SURREAL ELEMENTS: Impossible geometry, dream logic, reality-bending physics, scale distortions, metamorphosis
+- UNUSUAL JUXTAPOSITIONS: Combine unexpected elements - organic with mechanical, ancient with futuristic, microscopic with cosmic
+- DRAMATIC EXTREMES: Push lighting, color, and atmosphere to extremes - bioluminescence, chromatic aberration, infrared, x-ray vision
+- TEXTURE OBSESSION: Hyper-detailed materials - iridescent surfaces, subsurface scattering, crystalline structures, liquid metal, living stone
+- ARTISTIC CHAOS: Controlled chaos in composition - fractals, impossible architecture, M.C. Escher perspectives, non-Euclidean spaces
+- EMOTIONAL INTENSITY: Evoke strong feelings - awe, unease, wonder, vertigo, transcendence
+- CROSS-GENRE MASHUPS: Blend genres freely - cosmic horror meets Art Nouveau, cyberpunk baroque, biopunk renaissance
+- SYNESTHESIA: Describe sounds as colors, emotions as textures, time as space
+- SCALE PLAY: Macro/micro worlds, giants and miniatures, infinite recursion, worlds within worlds
+- UNEXPECTED BEAUTY: Find beauty in strange places - decay, glitches, entropy, emergence""",
     },
 }
 
@@ -202,6 +226,67 @@ class OllamaResponse:
         return 0.0
 
 
+def get_gpu_free_vram(gpu_index: int = 0) -> float:
+    """Get free VRAM on specified GPU in GB."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['nvidia-smi', '--query-gpu=memory.free', '--format=csv,noheader,nounits', f'-i={gpu_index}'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            free_mb = float(result.stdout.strip())
+            return free_mb / 1024  # Convert to GB
+    except Exception as e:
+        logger.warning(f"Could not get GPU VRAM: {e}")
+    return 0.0
+
+
+def estimate_model_vram(model_name: str) -> float:
+    """Estimate VRAM needed for a model based on its name/size.
+
+    Returns estimated VRAM in GB.
+    """
+    model_lower = model_name.lower()
+
+    # Extract size from model name
+    size_patterns = [
+        ('70b', 45), ('80b', 50), ('72b', 45),  # Very large
+        ('30b', 20), ('32b', 22), ('34b', 23),  # Large
+        ('24b', 16), ('27b', 18),               # Medium-large
+        ('13b', 10), ('14b', 11), ('15b', 12),  # Medium
+        ('7b', 5), ('8b', 6), ('9b', 7),        # Small
+        ('3b', 3), ('4b', 3.5),                 # Tiny
+        ('1b', 1.5), ('0.5b', 1),               # Very tiny
+    ]
+
+    for pattern, vram in size_patterns:
+        if pattern in model_lower:
+            return vram
+
+    # Default guess for unknown models
+    return 8.0
+
+
+def check_model_fits_gpu(model_name: str, gpu_index: int = 0) -> tuple[bool, str]:
+    """Check if a model will fit in GPU VRAM.
+
+    Returns (fits: bool, message: str).
+    """
+    free_vram = get_gpu_free_vram(gpu_index)
+    estimated_vram = estimate_model_vram(model_name)
+
+    if free_vram == 0:
+        return True, "Could not check GPU VRAM"
+
+    fits = free_vram >= estimated_vram
+
+    if fits:
+        return True, f"Model {model_name} (~{estimated_vram:.1f}GB) fits in {free_vram:.1f}GB free VRAM"
+    else:
+        return False, f"WARNING: Model {model_name} needs ~{estimated_vram:.1f}GB but only {free_vram:.1f}GB free!"
+
+
 class OllamaClient:
     """Client for interacting with Ollama API"""
 
@@ -229,6 +314,63 @@ class OllamaClient:
         except Exception as e:
             logger.error(f"Error listing models: {e}")
         return []
+
+    def get_loaded_model(self) -> Optional[Dict]:
+        """Get the currently loaded model info.
+
+        Returns dict with 'name' and 'size_vram' keys, or None if no model loaded.
+        """
+        try:
+            response = requests.get(f"{self.base_url}/api/ps", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                models = data.get('models', [])
+                if models:
+                    return {
+                        'name': models[0].get('name', 'unknown'),
+                        'size_vram': models[0].get('size_vram', 0) / (1024**3),  # Convert to GB
+                    }
+        except Exception as e:
+            logger.warning(f"Could not get loaded model: {e}")
+        return None
+
+    def wait_for_model(self, model_name: str, timeout: int = 600, callback=None) -> bool:
+        """Wait for a model to be loaded.
+
+        Args:
+            model_name: Model name to wait for
+            timeout: Maximum seconds to wait
+            callback: Optional callback(message) for progress updates
+
+        Returns True if model loaded, False on timeout.
+        """
+        import time
+        start = time.time()
+
+        if callback:
+            callback(f"Loading model {model_name}...")
+
+        # First check if model fits in GPU
+        fits, msg = check_model_fits_gpu(model_name)
+        if not fits:
+            logger.warning(msg)
+            if callback:
+                callback(msg)
+
+        while time.time() - start < timeout:
+            loaded = self.get_loaded_model()
+            if loaded and model_name in loaded['name']:
+                if callback:
+                    callback(f"Model {model_name} ready ({loaded['size_vram']:.1f}GB VRAM)")
+                return True
+
+            elapsed = int(time.time() - start)
+            if callback and elapsed % 10 == 0:
+                callback(f"Loading {model_name}... ({elapsed}s)")
+
+            time.sleep(2)
+
+        return False
 
     def generate(
         self,
@@ -259,7 +401,7 @@ class OllamaClient:
             response = requests.post(
                 f"{self.base_url}/api/generate",
                 json=payload,
-                timeout=300  # 5 min timeout for large models
+                timeout=900  # 15 min timeout for loading large models
             )
 
             if response.status_code == 200:
@@ -309,7 +451,7 @@ class OllamaClient:
                 f"{self.base_url}/api/generate",
                 json=payload,
                 stream=True,
-                timeout=300
+                timeout=900  # 15 min timeout for loading large models
             ) as response:
                 for line in response.iter_lines():
                     if line:
@@ -366,6 +508,8 @@ class PromptEnhancer:
             "medium": 1024,
             "long": 1536,
             "detailed": 2048,
+            "cinematic": 4096,
+            "experimental": 6000,
         }
         max_tokens = max_tokens_map.get(length, 1024)
 

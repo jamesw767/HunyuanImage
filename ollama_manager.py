@@ -134,18 +134,31 @@ class OllamaManager:
             size_bytes /= 1024
         return f"{size_bytes:.1f}TB"
 
-    def start(self, wait: bool = True, timeout: int = 30) -> Tuple[bool, str]:
-        """Start the Ollama server"""
+    def start(self, wait: bool = True, timeout: int = 30, gpu_index: Optional[int] = None) -> Tuple[bool, str]:
+        """Start the Ollama server.
+
+        Args:
+            wait: Wait for server to be ready
+            timeout: Timeout in seconds
+            gpu_index: GPU index to use (sets CUDA_VISIBLE_DEVICES)
+        """
         if self.is_running():
             return True, "Ollama server is already running"
 
         try:
+            # Set up environment with GPU selection
+            env = os.environ.copy()
+            if gpu_index is not None:
+                env["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
+                logger.info(f"Starting Ollama on GPU {gpu_index}")
+
             # Start server in background
             process = subprocess.Popen(
                 [self.ollama_bin, "serve"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                start_new_session=True
+                start_new_session=True,
+                env=env
             )
 
             # Save PID
@@ -225,11 +238,15 @@ class OllamaManager:
         except Exception as e:
             return False, f"Error stopping server: {e}"
 
-    def restart(self) -> Tuple[bool, str]:
-        """Restart the Ollama server"""
+    def restart(self, gpu_index: Optional[int] = None) -> Tuple[bool, str]:
+        """Restart the Ollama server.
+
+        Args:
+            gpu_index: GPU index to use (sets CUDA_VISIBLE_DEVICES)
+        """
         self.stop()
         time.sleep(1)
-        return self.start()
+        return self.start(gpu_index=gpu_index)
 
     def list_models(self) -> List[Dict]:
         """List installed models"""

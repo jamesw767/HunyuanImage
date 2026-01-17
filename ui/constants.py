@@ -93,8 +93,8 @@ OLLAMA_MODELS = ["qwen2.5:7b-instruct"]
 DEFAULT_OLLAMA_MODEL = "qwen2.5:7b-instruct"
 
 # Prompt enhancement options
-OLLAMA_LENGTH_OPTIONS = ["minimal", "short", "medium", "long", "detailed"]
-OLLAMA_COMPLEXITY_OPTIONS = ["simple", "basic", "moderate", "detailed", "complex"]
+OLLAMA_LENGTH_OPTIONS = ["random", "minimal", "short", "medium", "long", "detailed", "cinematic", "experimental"]
+OLLAMA_COMPLEXITY_OPTIONS = ["random", "simple", "moderate", "detailed", "complex", "cinematic", "experimental"]
 
 # =============================================================================
 # UI Configuration

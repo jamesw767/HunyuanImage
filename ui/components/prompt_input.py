@@ -33,6 +33,10 @@ class PromptInputComponents:
     # Style selection
     style_dropdown: gr.Dropdown
 
+    # Settings loader
+    settings_file: gr.File
+    load_settings_btn: gr.Button
+
 
 def get_ollama_models_list() -> List[str]:
     """Get list of available Ollama models."""
@@ -133,6 +137,22 @@ def create_prompt_input(
         lines=1,
     )
 
+    # Settings loader (drag & drop JSON)
+    gr.Markdown("### Load Settings")
+    with gr.Row():
+        settings_file = gr.File(
+            label="Drop settings JSON here",
+            file_types=[".json"],
+            file_count="single",
+            scale=2,
+        )
+        load_settings_btn = gr.Button(
+            "Load Settings",
+            variant="secondary",
+            size="sm",
+            scale=1,
+        )
+
     return PromptInputComponents(
         prompt=prompt,
         negative_prompt=negative_prompt,
@@ -141,6 +161,8 @@ def create_prompt_input(
         ollama_length=ollama_length,
         ollama_complexity=ollama_complexity,
         style_dropdown=style_dropdown,
+        settings_file=settings_file,
+        load_settings_btn=load_settings_btn,
     )
 
 

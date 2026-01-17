@@ -32,6 +32,12 @@ class AppState:
     # Single generation state
     single_generation_stop: bool = False
 
+    # Generation queue state
+    generation_queue: List[Dict] = field(default_factory=list)
+    queue_lock: threading.Lock = field(default_factory=threading.Lock)
+    queue_worker_running: bool = False
+    queue_stop_requested: bool = False
+
     # Session state
     current_session_dir: Optional[Path] = None
     session_counter: int = 0
@@ -67,18 +73,38 @@ def detect_gpus() -> List[Dict]:
 
     Note: PyTorch GPU indices may differ from nvidia-smi ordering.
     We use PyTorch's view since that's what the model uses.
+    Also maps to nvidia-smi indices for Ollama (CUDA_VISIBLE_DEVICES).
     """
     gpus = []
     try:
         import torch
+        import subprocess
+
+        # Get nvidia-smi GPU names for mapping
+        nvidia_smi_gpus = {}
+        try:
+            result = subprocess.run(
+                ['nvidia-smi', '--query-gpu=index,name', '--format=csv,noheader'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    idx, name = line.split(', ')
+                    nvidia_smi_gpus[name.strip()] = int(idx)
+        except Exception:
+            pass
+
         if torch.cuda.is_available():
             for i in range(torch.cuda.device_count()):
                 props = torch.cuda.get_device_properties(i)
+                # Find nvidia-smi index by matching GPU name
+                nvidia_idx = nvidia_smi_gpus.get(props.name, i)
                 gpus.append({
-                    'index': i,
+                    'index': i,  # PyTorch index (for model loading)
+                    'nvidia_index': nvidia_idx,  # nvidia-smi index (for CUDA_VISIBLE_DEVICES)
                     'name': props.name,
                     'memory_gb': props.total_memory / (1024**3),
-                    'display': f"PyTorch GPU {i}: {props.name} ({props.total_memory / (1024**3):.0f} GB)"
+                    'display': f"GPU {i}: {props.name} ({props.total_memory / (1024**3):.0f} GB)"
                 })
     except Exception as e:
         print(f"[GPU] Error detecting GPUs: {e}")

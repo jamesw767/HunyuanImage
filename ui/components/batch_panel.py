@@ -51,7 +51,11 @@ class BatchConfigComponents:
     batch_save_btn: gr.Button
     batch_config_dropdown: gr.Dropdown
     batch_load_btn: gr.Button
+    refresh_configs_btn: gr.Button
     batch_config_status: gr.Textbox
+    # Import from directory
+    import_dir_path: gr.Textbox
+    import_dir_btn: gr.Button
 
 
 @dataclass
@@ -82,11 +86,54 @@ class BrowseBatchComponents:
 
 
 @dataclass
+class WildcardEditorComponents:
+    """Wildcard editor tab components."""
+    wildcard_search: gr.Textbox
+    wildcard_list: gr.Dropdown
+    wildcard_preview: gr.Textbox
+    wildcard_items: gr.Textbox
+    add_item_input: gr.Textbox
+    add_item_btn: gr.Button
+    remove_item_btn: gr.Button
+    new_category_name: gr.Textbox
+    create_category_btn: gr.Button
+    delete_category_btn: gr.Button
+    save_wildcards_btn: gr.Button
+    reload_wildcards_btn: gr.Button
+    import_wildcards_btn: gr.Button
+    wildcard_status: gr.Textbox
+    # Ollama generation
+    ollama_prompt: gr.Textbox
+    ollama_count: gr.Slider
+    ollama_complexity: gr.Dropdown
+    generate_from_ollama_btn: gr.Button
+    generate_and_save_btn: gr.Button
+
+
+@dataclass
+class StyleEditorComponents:
+    """Style/keyword editor tab components."""
+    style_list: gr.Dropdown
+    style_name_input: gr.Textbox
+    style_suffix_input: gr.Textbox
+    save_style_btn: gr.Button
+    delete_style_btn: gr.Button
+    new_style_name: gr.Textbox
+    new_style_suffix: gr.Textbox
+    create_style_btn: gr.Button
+    reload_styles_btn: gr.Button
+    style_status: gr.Textbox
+    style_preview: gr.Markdown
+
+
+@dataclass
 class BatchPanelComponents:
     """Container for all batch panel components."""
     config: BatchConfigComponents
     prompt_runs: PromptRunComponents
     browse: BrowseBatchComponents
+    wildcards: WildcardEditorComponents
+    styles: StyleEditorComponents
     accordion: gr.Accordion
 
 
@@ -96,14 +143,21 @@ def get_style_choices() -> List[str]:
 
 
 def get_ollama_models() -> List[str]:
-    """Get available Ollama models."""
+    """Get available Ollama models as string names."""
     try:
         from ui.state import get_state
         state = get_state()
         if state.ollama_manager:
             models = state.ollama_manager.list_models()
             if models:
-                return models
+                # Extract model names from dicts (ollama_manager returns dicts with 'name' key)
+                model_names = []
+                for m in models:
+                    if isinstance(m, dict):
+                        model_names.append(m.get('name', ''))
+                    else:
+                        model_names.append(str(m))
+                return [n for n in model_names if n]  # Filter out empty strings
     except Exception:
         pass
     return OLLAMA_MODELS
@@ -154,8 +208,8 @@ def create_batch_config_tab() -> BatchConfigComponents:
 
             with gr.Row():
                 batch_variations = gr.Slider(
-                    label="Variations per theme",
-                    minimum=1, maximum=100, value=3, step=1
+                    label="Iterations (cycles through all themes)",
+                    minimum=1, maximum=500, value=30, step=1
                 )
                 batch_images_per = gr.Slider(
                     label="Images per combo",
@@ -248,9 +302,19 @@ def create_batch_config_tab() -> BatchConfigComponents:
                 batch_config_dropdown = gr.Dropdown(
                     label="Saved Configs",
                     choices=get_saved_configs(),
-                    scale=2
+                    scale=3
                 )
                 batch_load_btn = gr.Button("Load", size="sm")
+                refresh_configs_btn = gr.Button("↻", size="sm")
+
+            gr.Markdown("---\n**Import from Directory**")
+            with gr.Row():
+                import_dir_path = gr.Textbox(
+                    label="Image Directory",
+                    placeholder="/path/to/images/folder",
+                    scale=3
+                )
+                import_dir_btn = gr.Button("Import", variant="secondary", size="sm")
 
             batch_config_status = gr.Textbox(
                 label="Config Status", interactive=False
@@ -289,7 +353,10 @@ def create_batch_config_tab() -> BatchConfigComponents:
         batch_save_btn=batch_save_btn,
         batch_config_dropdown=batch_config_dropdown,
         batch_load_btn=batch_load_btn,
+        refresh_configs_btn=refresh_configs_btn,
         batch_config_status=batch_config_status,
+        import_dir_path=import_dir_path,
+        import_dir_btn=import_dir_btn,
     )
 
 
@@ -394,6 +461,217 @@ def create_browse_tab() -> BrowseBatchComponents:
     )
 
 
+def get_initial_wildcard_categories() -> list:
+    """Get initial wildcard categories for dropdown."""
+    try:
+        from ui.state import get_state
+        state = get_state()
+        if state.wildcard_manager:
+            return state.wildcard_manager.get_available_wildcards()
+    except Exception:
+        pass
+    return []
+
+
+def create_wildcard_editor_tab() -> WildcardEditorComponents:
+    """Create the Wildcards editor tab."""
+    gr.Markdown("""
+    **Edit wildcard categories and items**
+    Use `[category]` in prompts for random substitution.
+    """)
+
+    # Get initial categories
+    initial_categories = get_initial_wildcard_categories()
+
+    with gr.Row():
+        with gr.Column(scale=1):
+            wildcard_search = gr.Textbox(
+                label="Search Categories",
+                placeholder="Type to filter...",
+            )
+            wildcard_list = gr.Dropdown(
+                label="Category",
+                choices=initial_categories,
+                value=initial_categories[0] if initial_categories else None,
+                scale=2,
+            )
+            wildcard_preview = gr.Textbox(
+                label="Category Info",
+                interactive=False,
+                lines=2,
+            )
+
+        with gr.Column(scale=2):
+            wildcard_items = gr.Textbox(
+                label="Items (one per line)",
+                lines=12,
+                max_lines=20,
+            )
+
+    with gr.Row():
+        add_item_input = gr.Textbox(
+            label="Add Item",
+            placeholder="New item to add",
+            scale=3,
+        )
+        add_item_btn = gr.Button("Add", size="sm", scale=1)
+        remove_item_btn = gr.Button("Remove Selected", size="sm", variant="stop", scale=1)
+
+    gr.Markdown("---\n**Create / Delete Category**")
+    with gr.Row():
+        new_category_name = gr.Textbox(
+            label="New Category Name",
+            placeholder="my-category",
+            scale=2,
+        )
+        create_category_btn = gr.Button("Create", variant="primary", size="sm", scale=1)
+        delete_category_btn = gr.Button("Delete Category", variant="stop", size="sm", scale=1)
+
+    with gr.Row():
+        save_wildcards_btn = gr.Button("Save All Changes", variant="primary", scale=2)
+        reload_wildcards_btn = gr.Button("Reload from File", scale=1)
+        import_wildcards_btn = gr.Button("Import from sd-wildcards/", variant="secondary", scale=1)
+
+    wildcard_status = gr.Textbox(label="Status", interactive=False)
+
+    gr.Markdown("---\n### Generate from Ollama LLM")
+    gr.Markdown("*Ask the LLM to generate wildcard lists or detailed scene descriptions*")
+
+    with gr.Row():
+        ollama_prompt = gr.Textbox(
+            label="Category / What to generate",
+            placeholder="dungeon environments, fantasy weapons, epic battle scenes...",
+            scale=3,
+        )
+        ollama_count = gr.Slider(
+            label="Count",
+            minimum=5,
+            maximum=50,
+            value=20,
+            step=5,
+            scale=1,
+        )
+        ollama_complexity = gr.Dropdown(
+            label="Detail Level",
+            choices=["keywords", "short", "medium", "long", "cinematic"],
+            value="medium",
+            scale=1,
+        )
+
+    with gr.Row():
+        generate_from_ollama_btn = gr.Button(
+            "Generate (Preview)",
+            variant="secondary",
+            scale=1,
+        )
+        generate_and_save_btn = gr.Button(
+            "Generate & Save Category",
+            variant="primary",
+            scale=2,
+        )
+
+    return WildcardEditorComponents(
+        wildcard_search=wildcard_search,
+        wildcard_list=wildcard_list,
+        wildcard_preview=wildcard_preview,
+        wildcard_items=wildcard_items,
+        add_item_input=add_item_input,
+        add_item_btn=add_item_btn,
+        remove_item_btn=remove_item_btn,
+        new_category_name=new_category_name,
+        create_category_btn=create_category_btn,
+        delete_category_btn=delete_category_btn,
+        save_wildcards_btn=save_wildcards_btn,
+        reload_wildcards_btn=reload_wildcards_btn,
+        import_wildcards_btn=import_wildcards_btn,
+        wildcard_status=wildcard_status,
+        ollama_prompt=ollama_prompt,
+        ollama_count=ollama_count,
+        ollama_complexity=ollama_complexity,
+        generate_from_ollama_btn=generate_from_ollama_btn,
+        generate_and_save_btn=generate_and_save_btn,
+    )
+
+
+def get_initial_style_names() -> list:
+    """Get initial style names for dropdown."""
+    try:
+        from ui.constants import DEFAULT_STYLE_PRESETS
+        return list(DEFAULT_STYLE_PRESETS.keys())
+    except Exception:
+        pass
+    return ["None"]
+
+
+def create_style_editor_tab() -> StyleEditorComponents:
+    """Create the Styles/Keywords editor tab."""
+    gr.Markdown("""
+    **Edit style presets**
+    Styles append text to your prompts automatically.
+    """)
+
+    # Get initial styles
+    initial_styles = get_initial_style_names()
+
+    with gr.Row():
+        with gr.Column(scale=1):
+            style_list = gr.Dropdown(
+                label="Select Style",
+                choices=initial_styles,
+                value=initial_styles[0] if initial_styles else None,
+            )
+            style_name_input = gr.Textbox(
+                label="Style Name",
+                interactive=False,
+            )
+
+        with gr.Column(scale=2):
+            style_suffix_input = gr.Textbox(
+                label="Style Suffix (appended to prompts)",
+                lines=4,
+                placeholder=", cinematic lighting, 8k resolution, hyperdetailed",
+            )
+
+    with gr.Row():
+        save_style_btn = gr.Button("Save Changes", variant="primary", scale=2)
+        delete_style_btn = gr.Button("Delete Style", variant="stop", scale=1)
+
+    gr.Markdown("---\n**Create New Style**")
+    with gr.Row():
+        new_style_name = gr.Textbox(
+            label="New Style Name",
+            placeholder="My Custom Style",
+            scale=1,
+        )
+        new_style_suffix = gr.Textbox(
+            label="Suffix",
+            placeholder=", dramatic lighting, award winning",
+            scale=2,
+        )
+        create_style_btn = gr.Button("Create", variant="primary", size="sm", scale=1)
+
+    with gr.Row():
+        reload_styles_btn = gr.Button("Reload Styles", scale=1)
+
+    style_status = gr.Textbox(label="Status", interactive=False)
+
+    style_preview = gr.Markdown("**Preview:** Select a style to see its suffix")
+
+    return StyleEditorComponents(
+        style_list=style_list,
+        style_name_input=style_name_input,
+        style_suffix_input=style_suffix_input,
+        save_style_btn=save_style_btn,
+        delete_style_btn=delete_style_btn,
+        new_style_name=new_style_name,
+        new_style_suffix=new_style_suffix,
+        create_style_btn=create_style_btn,
+        reload_styles_btn=reload_styles_btn,
+        style_status=style_status,
+        style_preview=style_preview,
+    )
+
+
 def create_batch_panel(open_by_default: bool = True) -> BatchPanelComponents:
     """Create the complete batch panel with all tabs.
 
@@ -418,6 +696,12 @@ def create_batch_panel(open_by_default: bool = True) -> BatchPanelComponents:
             with gr.Tab("Browse"):
                 browse = create_browse_tab()
 
+            with gr.Tab("Wildcards"):
+                wildcards = create_wildcard_editor_tab()
+
+            with gr.Tab("Styles"):
+                styles = create_style_editor_tab()
+
             with gr.Tab("Examples"):
                 gr.Markdown("""
                 **Example themes to try:**
@@ -430,15 +714,25 @@ def create_batch_panel(open_by_default: bool = True) -> BatchPanelComponents:
                 alien landscape with multiple moons and strange vegetation
                 ```
 
+                **Wildcard examples:**
+                ```
+                A [animal] in a [landscape] with [weather] weather
+                Portrait of a [occupation] wearing [color] clothes
+                [art-movement] painting of [subject]
+                ```
+
                 **Tips:**
                 - Use specific, descriptive themes
                 - Let Ollama add the creative details
                 - Mix different style presets for variety
+                - Use wildcards for random variations
                 """)
 
     return BatchPanelComponents(
         config=config,
         prompt_runs=prompt_runs,
         browse=browse,
+        wildcards=wildcards,
+        styles=styles,
         accordion=accordion,
     )
