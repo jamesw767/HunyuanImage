@@ -52,6 +52,39 @@ from ui.components import (
 )
 from core.model_manager import load_model, unload_model, get_model_status, is_model_loaded, get_model
 
+
+def open_directory_dialog(initial_dir: str = None) -> str:
+    """Open a native directory selection dialog using tkinter.
+
+    Returns the selected directory path, or the initial_dir if cancelled.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        # Create a hidden root window
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)  # Bring dialog to front
+
+        # Set initial directory
+        if not initial_dir or not Path(initial_dir).exists():
+            initial_dir = str(OUTPUT_DIR)
+
+        # Open directory selection dialog
+        selected = filedialog.askdirectory(
+            initialdir=initial_dir,
+            title="Select Directory"
+        )
+
+        root.destroy()
+
+        return selected if selected else (initial_dir or "")
+    except Exception as e:
+        print(f"[FILE DIALOG] Error: {e}")
+        return initial_dir or ""
+
+
 # Initialize integrations
 state = get_state()
 
@@ -623,7 +656,9 @@ def load_settings_from_json(file_obj):
             config = json.load(f)
 
         # Extract settings with defaults (handle both single image and batch field names)
-        prompt = config.get('prompt', '')
+        # Prefer full_prompt if available (the actual prompt used for generation)
+        # Fall back to prompt (original with wildcards/keywords)
+        prompt = config.get('full_prompt') or config.get('prompt', '')
         negative_prompt = config.get('negative_prompt', '')
         style = config.get('style', 'None')
         aspect_ratio = config.get('aspect_ratio', '1:1 (Square)')
@@ -1637,6 +1672,13 @@ def create_ui():
             outputs=[batch.config.batch_config_dropdown]
         )
 
+        # Browse button for import directory
+        batch.config.import_dir_browse_btn.click(
+            fn=open_directory_dialog,
+            inputs=[batch.config.import_dir_path],
+            outputs=[batch.config.import_dir_path]
+        )
+
         # Import batch from directory
         def import_from_dir_wrapper(dir_path):
             """Wrapper to unpack the tuple from import_batch_from_directory"""
@@ -1771,6 +1813,14 @@ def create_ui():
             fn=reload_styles,
             inputs=[],
             outputs=[batch.styles.style_list, batch.styles.style_status]
+        )
+
+        # Wire Browse tab
+        # Browse button for custom directory
+        batch.browse.batch_dir_browse_btn.click(
+            fn=open_directory_dialog,
+            inputs=[batch.browse.batch_dir_custom],
+            outputs=[batch.browse.batch_dir_custom]
         )
 
         # Recent gallery

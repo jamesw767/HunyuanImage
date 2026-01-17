@@ -55,6 +55,7 @@ class BatchConfigComponents:
     batch_config_status: gr.Textbox
     # Import from directory
     import_dir_path: gr.Textbox
+    import_dir_browse_btn: gr.Button
     import_dir_btn: gr.Button
 
 
@@ -80,6 +81,7 @@ class BrowseBatchComponents:
     """Browse Batches tab components."""
     batch_dir_dropdown: gr.Dropdown
     batch_dir_custom: gr.Textbox
+    batch_dir_browse_btn: gr.Button
     browse_refresh_btn: gr.Button
     browse_gallery: gr.Gallery
     browse_status: gr.Textbox
@@ -314,6 +316,7 @@ def create_batch_config_tab() -> BatchConfigComponents:
                     placeholder="/path/to/images/folder",
                     scale=3
                 )
+                import_dir_browse_btn = gr.Button("📁", size="sm", min_width=40)
                 import_dir_btn = gr.Button("Import", variant="secondary", size="sm")
 
             batch_config_status = gr.Textbox(
@@ -356,6 +359,7 @@ def create_batch_config_tab() -> BatchConfigComponents:
         refresh_configs_btn=refresh_configs_btn,
         batch_config_status=batch_config_status,
         import_dir_path=import_dir_path,
+        import_dir_browse_btn=import_dir_browse_btn,
         import_dir_btn=import_dir_btn,
     )
 
@@ -444,6 +448,7 @@ def create_browse_tab() -> BrowseBatchComponents:
             placeholder="/path/to/batch",
             scale=2
         )
+        batch_dir_browse_btn = gr.Button("📁", size="sm", min_width=40)
         browse_refresh_btn = gr.Button("↻", size="sm")
 
     browse_gallery = gr.Gallery(columns=6, rows=3, height=250)
@@ -455,6 +460,7 @@ def create_browse_tab() -> BrowseBatchComponents:
     return BrowseBatchComponents(
         batch_dir_dropdown=batch_dir_dropdown,
         batch_dir_custom=batch_dir_custom,
+        batch_dir_browse_btn=batch_dir_browse_btn,
         browse_refresh_btn=browse_refresh_btn,
         browse_gallery=browse_gallery,
         browse_status=browse_status,
