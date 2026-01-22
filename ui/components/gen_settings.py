@@ -13,7 +13,9 @@ from ui.constants import (
     DEFAULT_SEED,
     DEFAULT_ASPECT_RATIO,
     DEFAULT_QUALITY,
+    OUTPUT_DIR,
 )
+import subprocess
 
 
 @dataclass
@@ -24,6 +26,8 @@ class GenSettingsComponents:
     seed: gr.Number
     random_seed_btn: gr.Button
     batch_count: gr.Slider
+    output_dir: gr.Textbox
+    output_browse_btn: gr.Button
 
 
 def create_gen_settings() -> GenSettingsComponents:
@@ -72,12 +76,24 @@ def create_gen_settings() -> GenSettingsComponents:
         info="Generate multiple images with same settings"
     )
 
+    # Output directory with browse button
+    with gr.Accordion("Output Directory", open=False):
+        with gr.Row():
+            output_dir = gr.Textbox(
+                label="Output Directory",
+                value=str(OUTPUT_DIR),
+                scale=4
+            )
+            output_browse_btn = gr.Button("Browse", size="sm", scale=1)
+
     return GenSettingsComponents(
         aspect_ratio=aspect_ratio,
         quality=quality,
         seed=seed,
         random_seed_btn=random_seed_btn,
         batch_count=batch_count,
+        output_dir=output_dir,
+        output_browse_btn=output_browse_btn,
     )
 
 
@@ -101,6 +117,39 @@ def generate_random_seed() -> int:
     return random.randint(0, 2**31 - 1)
 
 
+def open_directory_dialog(initial_dir: str = None) -> str:
+    """Open a native directory selection dialog."""
+    try:
+        result = subprocess.run(
+            ["zenity", "--file-selection", "--directory",
+             "--title=Select Output Folder",
+             "--filename=" + (initial_dir if initial_dir else str(OUTPUT_DIR))],
+            capture_output=True, text=True, timeout=60
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        folder = filedialog.askdirectory(
+            initialdir=initial_dir if initial_dir else str(OUTPUT_DIR),
+            title="Select Output Folder"
+        )
+        root.destroy()
+        if folder:
+            return folder
+    except Exception:
+        pass
+
+    return initial_dir or ""
+
+
 def wire_gen_settings_events(components: GenSettingsComponents) -> None:
     """Wire up event handlers for generation settings.
 
@@ -112,4 +161,15 @@ def wire_gen_settings_events(components: GenSettingsComponents) -> None:
         fn=generate_random_seed,
         inputs=[],
         outputs=[components.seed]
+    )
+
+    # Output directory browse button
+    def handle_browse_output(current_path):
+        new_path = open_directory_dialog(current_path if current_path else str(OUTPUT_DIR))
+        return new_path if new_path else current_path
+
+    components.output_browse_btn.click(
+        fn=handle_browse_output,
+        inputs=[components.output_dir],
+        outputs=[components.output_dir]
     )

@@ -29,6 +29,7 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 IMAGE_SIZES = [
     "auto",
     "1024x1024",
+    "1536x1536",
     "1280x768",
     "768x1280",
     "1152x896",
@@ -42,7 +43,8 @@ IMAGE_SIZES = [
 ]
 
 ASPECT_RATIOS = {
-    "1:1 (Square)": "1024x1024",
+    "1:1 Square (1024)": "1024x1024",
+    "1:1 Square (1536)": "1536x1536",
     "16:9 (Landscape)": "1280x768",
     "16:9 (720p Video)": "1280x720",
     "16:9 (480p Video)": "832x480",
@@ -120,5 +122,5 @@ DEFAULT_UI_COLORS = {
 DEFAULT_SEED = -1  # -1 means random
 DEFAULT_STEPS = 20
 DEFAULT_GUIDANCE_SCALE = 5.0
-DEFAULT_ASPECT_RATIO = "1:1 (Square)"
+DEFAULT_ASPECT_RATIO = "1:1 Square (1024)"
 DEFAULT_QUALITY = "Standard"

@@ -167,16 +167,34 @@ def save_image_config(filepath: str, config: dict):
         json.dump(config, f, indent=2)
 
 
-def get_or_create_session_dir(prompt: str = "") -> Path:
-    """Get or create session directory for outputs."""
-    if state.current_session_dir is None or not state.current_session_dir.exists():
+def get_or_create_session_dir(prompt: str = "", base_dir: str = None) -> Path:
+    """Get or create session directory for outputs.
+
+    Args:
+        prompt: Prompt text for naming the directory
+        base_dir: Optional custom base directory (defaults to OUTPUT_DIR)
+    """
+    # Use custom base_dir if provided, otherwise use default OUTPUT_DIR
+    output_base = Path(base_dir) if base_dir else OUTPUT_DIR
+
+    # Check if we need a new session dir:
+    # - No session dir exists
+    # - Session dir no longer exists on disk
+    # - Base directory changed (session dir is not under current output_base)
+    need_new = (
+        state.current_session_dir is None
+        or not state.current_session_dir.exists()
+        or not str(state.current_session_dir).startswith(str(output_base))
+    )
+
+    if need_new:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         state.session_counter += 1
         safe_name = "".join(c for c in prompt[:25] if c.isalnum() or c in " -_").strip().replace(" ", "_")
         if not safe_name:
             safe_name = "session"
         dir_name = f"session_{timestamp}_{state.session_counter:03d}_{safe_name}"
-        state.current_session_dir = OUTPUT_DIR / dir_name
+        state.current_session_dir = output_base / dir_name
         state.current_session_dir.mkdir(parents=True, exist_ok=True)
     return state.current_session_dir
 
@@ -193,6 +211,7 @@ def generate_image(
     ollama_model: str,
     ollama_length: str,
     ollama_complexity: str,
+    output_dir: str = None,
 ):
     """Generate image(s) with the HunyuanImage model.
 
@@ -266,8 +285,8 @@ def generate_image(
         except Exception:
             pass
 
-    # Generate
-    session_dir = get_or_create_session_dir(prompt)
+    # Generate - use custom output_dir if provided
+    session_dir = get_or_create_session_dir(prompt, base_dir=output_dir)
     print(f"[GENERATE {gen_id}] Session dir: {session_dir}", flush=True)
 
     # Write a debug marker file to prove function was called
@@ -405,6 +424,7 @@ def add_to_queue(
     ollama_model: str,
     ollama_length: str,
     ollama_complexity: str,
+    output_dir: str = None,
 ):
     """Add a generation request to the queue.
 
@@ -419,6 +439,10 @@ def add_to_queue(
 
     app_state = get_state()
 
+    # Use custom output directory if provided
+    custom_output = Path(output_dir) if output_dir and output_dir.strip() else OUTPUT_DIR
+    app_state.custom_batch_base_dir = str(custom_output)
+
     # Create queue item with all parameters
     queue_item = {
         'prompt': prompt,
@@ -432,6 +456,7 @@ def add_to_queue(
         'ollama_model': ollama_model,
         'ollama_length': ollama_length,
         'ollama_complexity': ollama_complexity,
+        'output_dir': str(custom_output),
     }
 
     # Add to queue
@@ -505,6 +530,7 @@ def process_queue_item(item: dict):
     aspect_ratio = item['aspect_ratio']
     seed = item['seed']
     batch_count = item['batch_count']
+    output_dir = item.get('output_dir')  # Custom output directory
 
     print(f"[QUEUE ITEM {gen_id}] Starting: '{prompt[:50]}...'", flush=True)
 
@@ -554,8 +580,8 @@ def process_queue_item(item: dict):
         except Exception:
             pass
 
-    # Generate
-    session_dir = get_or_create_session_dir(prompt)
+    # Generate - use custom output_dir if provided
+    session_dir = get_or_create_session_dir(prompt, base_dir=output_dir)
 
     batch_count_int = int(batch_count)
     for i in range(batch_count_int):
@@ -1528,6 +1554,7 @@ def create_ui():
                 prompt.ollama_model,
                 prompt.ollama_length,
                 prompt.ollama_complexity,
+                settings.output_dir,
             ],
             outputs=[
                 output.output_image,
